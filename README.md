@@ -62,14 +62,17 @@ portable executable, no installation required. Double-click and play.
 
 ## 🛠 Tech
 
-Originally specced for UE5/C++; this implementation ships the same design on a
-lighter stack so it can build and run anywhere:
+**NOT C++ / UE5.** Originally specced for Unreal Engine 5 + C++, but this 
+implementation ships the same design on **Three.js + Electron** (WebGL2 + Node.js 
+in a portable exe). UE5 installer requires ~130 GB and wasn't available on this 
+system; the game logic and design are platform-agnostic and fully ported.
 
-- **Engine:** [Three.js](https://threejs.org/) (WebGL2) — custom post-processing,
-  instanced low-poly forest, dynamic shadow-mapped flashlight
-- **Audio:** WebAudio — fully synthesized (wind, whispers, entity breathing,
-  heartbeat), HRTF 3D panning, stress-coupled distortion
-- **Shell:** Electron → single portable Windows x64 `.exe`
+- **Graphics Engine:** [Three.js](https://threejs.org/) (WebGL2) — custom 
+  post-processing shaders, instanced low-poly forest, dynamic shadow-mapped 
+  flashlight, procedural asset generation
+- **Audio:** Web Audio API — 100% synthesized (wind, whispers, entity breathing, 
+  heartbeat, UI sounds), HRTF 3D spatial panning, stress-coupled pitch/distortion
+- **Runtime:** Electron 33 → single portable Windows x64 `.exe`, no installation
 
 ### Build from source
 
@@ -80,6 +83,13 @@ npm install
 npm start          # run in dev
 npm run dist       # package portable .exe into dist/
 ```
+
+## 👥 Credits
+
+**Design & Implementation:** vamp9  
+**Development Assistant:** Claude (Anthropic)
+
+---
 
 ## 📜 License
 
