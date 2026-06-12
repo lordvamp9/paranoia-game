@@ -47,15 +47,22 @@ export class Player {
   }
 
   _resolveGround(x, z) {
-    // pick the zone height closest to current ground (handles overlapped floors)
-    let best = 0, bestD = Infinity;
+    // among zones reachable from the current ground height (one step),
+    // prefer the highest-priority one (ramps > floors > default terrain);
+    // if none is reachable, fall back to the closest height.
+    let best = null, bestPrio = -Infinity;
+    let closest = 0, closestD = Infinity;
     for (const zo of WORLD.groundZones) {
       if (!zo.contains(x, z)) continue;
       const h = zo.height(x, z);
-      const d = Math.abs(h - this.groundY) - (zo.priority || 0) * 0.01;
-      if (d < bestD) { bestD = d; best = h; }
+      const d = Math.abs(h - this.groundY);
+      if (d < closestD) { closestD = d; closest = h; }
+      if (d < 0.6) {
+        const p = zo.priority || 0;
+        if (p > bestPrio) { bestPrio = p; best = h; }
+      }
     }
-    return best;
+    return best !== null ? best : closest;
   }
 
   _collide(nx, nz) {
