@@ -18,9 +18,14 @@ in your hand.
 
 ## 🎮 Download & Play
 
-Grab **`PARANOIA-v1.0.0-win64.exe`** from
+Grab **`PARANOIA-v2.0.0-win64.exe`** from
 [**Releases**](https://github.com/lordvamp9/paranoia-game/releases) — a single
-portable executable, no installation required. Double-click and play.
+**2.7 MB** portable executable, no installation required. Double-click and play.
+
+> v2.0.0 is the native **C++ rewrite** (raylib/OpenGL): dithered photoreal
+> aesthetic, inventory, real movement physics, Samara's well, cinematic
+> procedural audio. The original Three.js/Electron build remains available
+> as release v1.0.0.
 
 > 🎧 **Headphones strongly recommended.** The audio is 3D-positional — you will
 > hear them before you see them.
@@ -29,9 +34,10 @@ portable executable, no installation required. Double-click and play.
 |---|---|
 | `WASD` | Move |
 | Mouse | Look (smartphone POV) |
-| `Shift` | Sprint (they hear it) |
+| `Shift` | Sprint (limited stamina — they count on it) |
 | `F` | Flashlight on/off |
 | `E` | Interact |
+| `1-5` | Inventory: phone, keys, note, spare batteries |
 | `0-9` | Enter codes |
 | `F11` | Toggle fullscreen |
 | `Esc` | Release mouse |
@@ -62,17 +68,38 @@ portable executable, no installation required. Double-click and play.
 
 ## 🛠 Tech
 
-**NOT C++ / UE5.** Originally specced for Unreal Engine 5 + C++, but this 
-implementation ships the same design on **Three.js + Electron** (WebGL2 + Node.js 
-in a portable exe). UE5 installer requires ~130 GB and wasn't available on this 
-system; the game logic and design are platform-agnostic and fully ported.
+### v2.0.0 — native C++ (current)
 
-- **Graphics Engine:** [Three.js](https://threejs.org/) (WebGL2) — custom 
-  post-processing shaders, instanced low-poly forest, dynamic shadow-mapped 
-  flashlight, procedural asset generation
-- **Audio:** Web Audio API — 100% synthesized (wind, whispers, entity breathing, 
-  heartbeat, UI sounds), HRTF 3D spatial panning, stress-coupled pitch/distortion
-- **Runtime:** Electron 33 → single portable Windows x64 `.exe`, no installation
+**C++17 + [raylib](https://www.raylib.com/) 6.0 (OpenGL 3.3)**, compiled with
+MinGW-w64 GCC into a single static 2.7 MB exe. Everything is still procedural —
+no asset files of any kind.
+
+- **Dithered-photoreal look:** 640x360 internal render, custom GLSL pipeline —
+  Bayer 8x8 ordered dithering + color quantization, heavy film grain, chromatic
+  aberration, stress glitches. PSX-photograph aesthetic.
+- **Lighting:** per-pixel flashlight with real shadow mapping (1024px depth pass
+  from the phone), noise-perturbed normals for surface detail, exponential fog
+  the white house refuses to obey.
+- **Physics & feel:** acceleration/inertia, gravity, landing dips, head-bob with
+  footstep sync, camera roll, stamina-limited sprint. Entities *walk* — stride
+  cycles, body bob, twitches; nothing floats.
+- **Entities:** shadow stalkers (5-state AI with coordinated hunts), pale
+  Watchers that vanish under light, and **Samara** — approach the well the
+  crossroad sign warns about and she climbs out, lurching after you.
+- **Inventory:** slots 1-5 (phone, keys, note, spare batteries), left-hand
+  pickup/inspection animations, in-world battery pickups.
+- **Audio:** 48 kHz DSP engine in the audio callback — layered brown-noise wind,
+  gravel/wood footsteps, formant whispers, sub-harmonic growls, Samara's
+  pitch-falling groans, Schroeder reverb per environment, heartbeat and breath
+  coupled to stress. Cinematic, not retro.
+
+Build it yourself: `cd cpp && make` (needs [w64devkit](https://github.com/skeeto/w64devkit)
+and the raylib 6.0 MinGW package).
+
+### v1.0.0 — Three.js + Electron (legacy)
+
+The original implementation: Three.js (WebGL2) + Web Audio + Electron, ~75 MB.
+Same campaign, first iteration of the visuals. Kept as release v1.0.0.
 
 ### Build from source
 

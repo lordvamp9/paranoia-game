@@ -1,0 +1,21 @@
+1 ICON "../build/icon.ico"
+1 VERSIONINFO
+FILEVERSION 2,0,0,0
+PRODUCTVERSION 2,0,0,0
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904E4"
+    BEGIN
+      VALUE "CompanyName", "vamp9"
+      VALUE "FileDescription", "PARANOIA - first-person psychological horror"
+      VALUE "FileVersion", "2.0.0"
+      VALUE "ProductName", "PARANOIA"
+      VALUE "LegalCopyright", "MIT (c) 2026 vamp9"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1252
+  END
+END
