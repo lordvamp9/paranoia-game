@@ -19,11 +19,12 @@ void HouseBuild() {
   auto ext = [&](float w, float h, float d, float x, float y, float z) {
     AddItem(GenMeshCube(w, h, d), MatrixTranslate(HX + x, y, HZ + z), texExt, extC, 0.05f, true, 0.30f, 0.42f);
   };
-  ext(5.4f, 5.6f, 0.25f, -3.3f, 2.8f, 5); ext(5.4f, 5.6f, 0.25f, 3.3f, 2.8f, 5);
-  ext(1.2f, 3.4f, 0.25f, 0, 3.9f, 5);
+  // front wall: a wide doorway, x[-1.0,1.0], so you actually fit through
+  ext(4.0f, 5.6f, 0.25f, -3.95f, 2.8f, 5); ext(4.0f, 5.6f, 0.25f, 3.95f, 2.8f, 5);
+  ext(2.2f, 3.0f, 0.25f, 0, 4.1f, 5); // lintel above the door
   ext(12, 5.6f, 0.25f, 0, 2.8f, -5);
   ext(0.25f, 5.6f, 10, -6, 2.8f, 0); ext(0.25f, 5.6f, 10, 6, 2.8f, 0);
-  AddBoxCol(HX - 6.1f, HX - 0.65f, HZ + 4.8f, HZ + 5.2f); AddBoxCol(HX + 0.65f, HX + 6.1f, HZ + 4.8f, HZ + 5.2f);
+  AddBoxCol(HX - 6.1f, HX - 1.05f, HZ + 4.85f, HZ + 5.15f); AddBoxCol(HX + 1.05f, HX + 6.1f, HZ + 4.85f, HZ + 5.15f);
   AddBoxCol(HX - 6.1f, HX + 6.1f, HZ - 5.2f, HZ - 4.8f);
   AddBoxCol(HX - 6.2f, HX - 5.85f, HZ - 5, HZ + 5); AddBoxCol(HX + 5.85f, HX + 6.2f, HZ - 5, HZ + 5);
   // roof + chimney (asymmetric on purpose)
@@ -31,13 +32,13 @@ void HouseBuild() {
   AddItem(roof, MTRS3({ HX + 0.2f, 5.6f, HZ }, { 0, PI / 4 + 0.05f, 0 }, { 1.18f, 1, 0.95f }), texExt, Color{ 188, 188, 198, 255 }, 0.04f, true, 0.26f, 0.42f);
   AddItem(GenMeshCube(0.7f, 1.8f, 0.7f), MTRS3({ HX + 3.1f, 7.0f, HZ - 1.2f }, { 0, 0.06f, 0 }, { 1, 1, 1 }), texExt, Color{ 175, 175, 185, 255 }, 0, true, 0.22f, 0.42f);
   // windows — black voids, misaligned
-  float wins[8][4] = { { -3.4f, 1.6f, 5.14f, 0 }, { 2.8f, 1.75f, 5.14f, 0 }, { 4.6f, 1.5f, 5.14f, 0 }, { -1.7f, 1.65f, 5.14f, 0 },
+  float wins[8][4] = { { -3.9f, 1.6f, 5.14f, 0 }, { 2.8f, 1.75f, 5.14f, 0 }, { 4.6f, 1.5f, 5.14f, 0 }, { -5.0f, 1.65f, 5.14f, 0 },
                        { -2.6f, 4.3f, 5.14f, 0.03f }, { 3.3f, 4.45f, 5.14f, -0.04f }, { 6.14f, 1.6f, -1, PI / 2 }, { -6.14f, 1.7f, 1.5f, -PI / 2 } };
   for (auto& w : wins)
     AddItem(QuadMesh(0.9f, 1.2f), MTRS3({ HX + w[0], w[1], HZ + w[2] }, { 0, w[3], w[3] == 0.03f || w[3] == -0.04f ? w[3] : 0 }, { 1, 1, 1 }), gGfx.white, Color{ 2, 2, 5, 255 }, 0, false, 0, 0.42f);
-  // front door — dark red, ajar (hinge on its left edge)
-  gWorld.frontDoor = AddItem(GenMeshCube(1.2f, 2.2f, 0.08f),
-    MatrixMultiply(MatrixMultiply(MatrixTranslate(0.6f, 0, 0), MatrixRotateY(-1.1f)), MatrixTranslate(HX - 0.6f, 1.1f, HZ + 5)),
+  // front door — dark red, swung wide open (hinge on its left edge at x=-1)
+  gWorld.frontDoor = AddItem(GenMeshCube(2.0f, 2.6f, 0.08f),
+    MatrixMultiply(MatrixMultiply(MatrixTranslate(1.0f, 0, 0), MatrixRotateY(-1.45f)), MatrixTranslate(HX - 1.0f, 1.3f, HZ + 5)),
     texWood, Color{ 96, 30, 24, 255 }, 0.10f);
   // yard fence, broken
   for (int i = 0; i < 14; i++) {
@@ -129,7 +130,7 @@ void HouseBuild() {
   AddItem(GenMeshCube(13.5f, 0.1f, 10), MatrixTranslate(HX - 0.75f, -0.25f, HZ), texFloor, Color{ 110, 106, 100, 255 }, 0, false);
   auto mkB = [&](float w, float h, float d, float x, float y, float z, bool col = true) {
     AddItem(GenMeshCube(w, h, d), MatrixTranslate(HX + x, y, HZ + z), texWall, bWall);
-    if (col) AddBoxCol(HX + x - w / 2, HX + x + w / 2, HZ + z - d / 2, HZ + z + d / 2, -1e9f, 0);
+    if (col) AddBoxCol(HX + x - w / 2, HX + x + w / 2, HZ + z - d / 2, HZ + z + d / 2, -1e9f, -0.5f);
   };
   mkB(13.5f, 2.4f, 0.2f, -0.75f, -1.4f, 5);
   mkB(13.5f, 2.4f, 0.2f, -0.75f, -1.4f, -5);
@@ -142,7 +143,7 @@ void HouseBuild() {
   }
   mkB(1.0f, 0.8f, 1.0f, 2.5f, -2.1f, 3.5f); mkB(0.8f, 0.6f, 0.8f, 3.6f, -2.2f, 3.2f); // boxes
   AddItem(GenMeshCube(1.8f, 1.6f, 1.0f), MatrixTranslate(HX - 2.5f, -1.7f, HZ + 4.2f), texWall, Color{ 96, 104, 94, 255 }, 0.2f); // dead machine
-  AddBoxCol(HX - 3.4f, HX - 1.6f, HZ + 3.7f, HZ + 4.7f, -1e9f, 0);
+  AddBoxCol(HX - 3.4f, HX - 1.6f, HZ + 3.7f, HZ + 4.7f, -1e9f, -0.5f);
   for (int i = 0; i < 5; i++) // hanging cables
     AddItem(GenMeshCylinder(0.015f, 0.7f + frand() * 0.5f, 4), MTRS3({ HX - 3 + frand() * 6, -1.05f, HZ - 3 + frand() * 6 }, { frand2() * 0.3f, 0, 0 }, { 1, 1, 1 }), gGfx.white, Color{ 30, 30, 30, 255 });
   // MURAL
@@ -152,7 +153,7 @@ void HouseBuild() {
   mkB(0.2f, 2.4f, 3.8f, -4, -1.4f, -3.1f);
   mkB(0.2f, 2.4f, 4.6f, -4, -1.4f, 2.5f);
   gWorld.falseWall = AddItem(GenMeshCube(0.22f, 2.4f, 1.3f), MatrixTranslate(HX - 4, -1.4f, HZ - 0.4f), texWall, bWall);
-  gWorld.falseWallCol = AddBoxCol(HX - 4.12f, HX - 3.88f, HZ - 1.05f, HZ + 0.25f, -1e9f, 0);
+  gWorld.falseWallCol = AddBoxCol(HX - 4.12f, HX - 3.88f, HZ - 1.05f, HZ + 0.25f, -1e9f, -0.5f);
 
   // hidden room: pedestal + the original smartphone + note
   mkB(3.5f, 2.4f, 0.2f, -5.75f, -1.4f, -2.5f);
@@ -201,4 +202,23 @@ void OpenDrawer() {
 void SetMirrorFigure(float opacity) {
   gMirrorFigOpacity = opacity;
   gWorld.items[gMirrorFigItem].tint = Color{ 5, 5, 8, (unsigned char)(opacity * 255) };
+}
+
+// restore all dynamic world objects to their initial (closed/present) state
+void WorldResetDynamics() {
+  gWorld.items[gWorld.cabinDoor].transform = MatrixTranslate(gWorld.cabin.x - 2.5f, 1.0f, gWorld.cabin.z);
+  gWorld.boxes[gWorld.cabinDoorCol].enabled = true;
+  gWorld.items[gWorld.basementDoor].transform = MatrixTranslate(HX + 5.0f, 1.05f, HZ - 0.3f);
+  gWorld.boxes[gWorld.basementDoorCol].enabled = true;
+  gWorld.items[gWorld.bedroomDoor].transform = MatrixTranslate(HX - 4.2f, 4.1f, HZ - 4.2f);
+  gWorld.boxes[gWorld.bedroomDoorCol].enabled = true;
+  gWorld.items[gWorld.falseWall].transform = MatrixTranslate(HX - 4, -1.4f, HZ - 0.4f);
+  gWorld.boxes[gWorld.falseWallCol].enabled = true;
+  gWorld.items[gWorld.drawer2].transform = MatrixTranslate(HX + 4.93f, 0.62f, HZ + 0.75f + 0.72f);
+  gWorld.items[gWorld.waterKeyItem].tint.a = 255;
+  gWorld.items[gWorld.wellBatteryItem].tint.a = 255;
+  gWorld.items[gWorld.baseBatteryItem].tint.a = 255;
+  SetMirrorFigure(0);
+  gWorld.signCodeAlpha = 0;
+  gWorld.items[gWorld.signCodeItem].tint.a = 0;
 }

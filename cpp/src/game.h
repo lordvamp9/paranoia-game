@@ -94,7 +94,7 @@ void SetSway(int instanced, int sway);
 
 // ---------------------------------------------------------------- entities
 enum class EState { Idle, Alerted, Pursuing, Hunting, Retreating, Dormant, Emerging };
-enum class EKind { Shadow, Samara, Watcher };
+enum class EKind { Shadow, Samara, Watcher, Crawler };
 struct Entity {
   EKind kind = EKind::Shadow;
   EState state = EState::Idle;
@@ -102,7 +102,7 @@ struct Entity {
   std::vector<Vector3> patrol;
   int patrolIdx = 0;
   float stateT = 0, pauseT = 0, lostT = 0, recoilT = 0, speed = 0;
-  float walkPhase = 0, twitchT = 0, emergeT = 0;
+  float walkPhase = 0, twitchT = 0, emergeT = 0, cryT = 0;
   float aggression = 1.0f;
   bool lethal = true, frozen = false, removed = false, visible = true;
   int huntRole = 0; // 0 chaser, 1 flanker
@@ -116,6 +116,7 @@ void EntityUpdate(Entity& e, float dt, float time);
 void EntityDraw(Entity& e, float time);
 void SpawnShadow(Vector3 home, std::vector<Vector3> patrol, float aggression, bool lethal);
 void SpawnSamara();
+void SpawnCrawler(Vector3 home);
 bool EntityLit(const Entity& e);
 
 // ---------------------------------------------------------------- inventory
@@ -176,6 +177,7 @@ struct Director {
   float stress = 0;
   float gameTime = 0;
   float catchCooldown = 0;
+  float graceT = 0;            // brief safety after entering/being caught
   bool entitiesNear = false;
   bool whispers = false;
   int ending = 0;             // 0 none, 1 trust, 2 refuse
@@ -193,6 +195,7 @@ struct Director {
   std::string sub; float subT = 0;
   std::string big; float bigT = 0;
   float flashWhite = 0, flashBlack = 0, glitch = 0;
+  float rainVisual = 0;
 };
 extern Director gDir;
 void DirectorStart();
@@ -219,6 +222,15 @@ void GfxInit();
 void GfxRenderFrame(float time, float dt);
 Texture2D MakeNoiseTexture(int size, Color base, int variation);
 Texture2D MakeTextTexture(int w, int h, Color bg, std::function<void()> draw);
+
+// ---------------------------------------------------------------- states
+enum GState { GS_MENU, GS_INTRO, GS_PLAY, GS_PAUSE, GS_SETTINGS, GS_CREDITS };
+extern int gState;
+extern float gStateT;        // time in current state
+extern bool gReqQuit, gReqRestart;
+void UIDrawOverlay(float time);   // menus/intro/pause/credits (in scene RT)
+void UIHandleInput();             // mouse+key for non-play states
+void IntroStart();
 
 void WorldBuild();
 void WorldDraw(bool shadowPass, float time);

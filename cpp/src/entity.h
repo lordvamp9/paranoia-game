@@ -11,6 +11,36 @@ std::vector<Entity> gEntities;
 static Mesh mshPart; // shared unit cube for body parts
 static Material gMatEnt;
 static bool gEntInit = false;
+static Texture2D texGhostFace, texGhostFaceGrin, texHairStrand;
+
+static void BuildEntityTextures() {
+  { // hollow spectral face: pale, sunken black eyes, faint open mouth
+    Image im = GenImageColor(64, 80, BLANK);
+    DrawEllipseOnImage(&im, 32, 40, 24, 34, Color{ 196, 198, 192, 235 }, true);  // face
+    DrawEllipseOnImage(&im, 32, 40, 24, 34, Color{ 150, 150, 150, 60 }, false);
+    DrawEllipseOnImage(&im, 22, 34, 7, 9, Color{ 4, 4, 6, 255 }, true);          // L eye socket
+    DrawEllipseOnImage(&im, 42, 34, 7, 9, Color{ 4, 4, 6, 255 }, true);          // R eye socket
+    // dark trails under eyes
+    ImageDrawRectangle(&im, 20, 42, 4, 16, Color{ 30, 25, 28, 150 });
+    ImageDrawRectangle(&im, 40, 42, 4, 16, Color{ 30, 25, 28, 150 });
+    DrawEllipseOnImage(&im, 32, 62, 5, 8, Color{ 10, 6, 8, 220 }, true);         // gaping mouth
+    texGhostFace = LoadTextureFromImage(im); UnloadImage(im);
+  }
+  { // the grin: under-bed crawler — wide teeth, black eyes
+    Image im = GenImageColor(64, 64, BLANK);
+    DrawEllipseOnImage(&im, 32, 30, 28, 28, Color{ 205, 205, 198, 240 }, true);
+    DrawEllipseOnImage(&im, 21, 24, 6, 7, Color{ 2, 2, 4, 255 }, true);
+    DrawEllipseOnImage(&im, 43, 24, 6, 7, Color{ 2, 2, 4, 255 }, true);
+    DrawEllipseOnImage(&im, 32, 44, 18, 9, Color{ 6, 4, 6, 255 }, true);          // mouth
+    for (int i = -3; i <= 3; i++) ImageDrawRectangle(&im, 32 + i * 5 - 1, 38, 3, 14, Color{ 220, 218, 208, 255 }); // teeth
+    texGhostFaceGrin = LoadTextureFromImage(im); UnloadImage(im);
+  }
+  { // a single hair strand strip (vertical), dark, for hair curtains
+    Image im = GenImageColor(8, 64, BLANK);
+    for (int y = 0; y < 64; y++) { int a = 200 - y; ImageDrawRectangle(&im, 1 + (y % 3), y, 4, 1, Color{ 6, 5, 8, (unsigned char)Clamp(a, 40, 255) }); }
+    texHairStrand = LoadTextureFromImage(im); UnloadImage(im);
+  }
+}
 
 bool EntityLit(const Entity& e) {
   if (!gPhone.lightOn || gPhone.battery <= 0 || gPhone.flickerOff) return false;
@@ -52,6 +82,17 @@ void SpawnWatcher(Vector3 at) {
   e.home = at; e.pos = at;
   e.state = EState::Idle;
   e.lethal = false;
+  gEntities.push_back(e);
+}
+
+void SpawnCrawler(Vector3 home) {
+  Entity e;
+  e.kind = EKind::Crawler;
+  e.home = home; e.pos = home;
+  e.state = EState::Idle;
+  e.aggression = 1.25f;
+  e.lethal = true;
+  e.audioVoice = AudioEntityVoice();
   gEntities.push_back(e);
 }
 
@@ -165,7 +206,7 @@ void EntityUpdate(Entity& e, float dt, float time) {
     e.state = EState::Retreating; e.stateT = 0;
     gDir.stress = fminf(100, gDir.stress + 6);
     gDir.glitch += 0.4f;
-  } else if (!playerBelow && e.state != EState::Retreating) {
+  } else if (!playerBelow && e.state != EState::Retreating && gDir.graceT <= 0) {
     if (lit && dist >= 7) {
       e.lastSeen = pp; e.lastSeenTime = time;
       if (e.state == EState::Idle || e.state == EState::Alerted) {
@@ -262,7 +303,9 @@ void EntityUpdate(Entity& e, float dt, float time) {
           nx = c.x + dx / dd * r; nz = c.z + dz / dd * r;
         }
       }
-      e.pos.x = nx; e.pos.z = nz; e.pos.y = 0;
+      e.pos.x = nx; e.pos.z = nz;
+      // crawler follows floors (stairs/upstairs); shadows stay on the ground plane
+      e.pos.y = (e.kind == EKind::Crawler) ? ResolveGround(nx, nz, e.pos.y) : 0;
       e.facing = atan2f(dir.x, dir.z);
       e.speed = speed;
       e.walkPhase += speed * dt * 1.45f; // stride drives the legs
@@ -271,9 +314,17 @@ void EntityUpdate(Entity& e, float dt, float time) {
   if (frand() < dt * 1.2f) e.twitchT = 0.06f + frand() * 0.08f;
   e.twitchT = fmaxf(0, e.twitchT - dt);
 
-  if (e.lethal && dist < 0.9f && !playerBelow && !playerAbove &&
+  if (e.lethal && dist < 0.95f && fabsf(e.pos.y - gPlayer.groundY) < 1.5f && !playerBelow &&
+      (e.kind == EKind::Crawler || !playerAbove) &&
       (e.state == EState::Pursuing || e.state == EState::Hunting)) {
     DirectorCatch(e);
+  }
+  // unique cries: agitated when hunting, rare distant sob when idle
+  e.cryT -= dt;
+  if (e.cryT <= 0) {
+    bool agitated = (e.state == EState::Pursuing || e.state == EState::Hunting || e.state == EState::Alerted);
+    if (agitated && dist < 28) { SfxEntityCry(e.pos, e.kind == EKind::Crawler ? 3 : 0); e.cryT = 2.6f + frand() * 2.5f; }
+    else e.cryT = 9 + frand() * 10;
   }
   if (e.audioVoice >= 0) AudioEntityUpdate(e.audioVoice, e.pos, e.state, e.kind);
 }
@@ -288,60 +339,106 @@ static void DrawPart(Vector3 size, Vector3 local, Vector3 rot, Matrix world, Tex
   DrawMesh(mshPart, gMatEnt, m);
 }
 
+// billboard a face/grin texture at a world point, facing the camera
+static void DrawFace(Texture2D tex, Vector3 at, float size, float alpha) {
+  Rectangle src = { 0, 0, (float)tex.width, (float)tex.height };
+  DrawBillboardPro(gPlayer.cam, tex, src, at, { 0, 1, 0 }, { size, size * tex.height / tex.width },
+    { size / 2, size * tex.height / tex.width / 2 }, 0, Fade(WHITE, alpha));
+}
+// hair curtain: dark strands hanging from a head point, facing camera
+static void DrawHair(Vector3 head, float w, float len, float alpha) {
+  Rectangle src = { 0, 0, (float)texHairStrand.width, (float)texHairStrand.height };
+  for (int i = -2; i <= 2; i++) {
+    Vector3 p = head; p.x += i * w * 0.18f;
+    DrawBillboardPro(gPlayer.cam, texHairStrand, src, { p.x, p.y - len / 2, p.z }, { 0, 1, 0 },
+      { w * 0.5f, len }, { w * 0.25f, len / 2 }, 0, Fade(WHITE, alpha));
+  }
+}
+
 void EntityDraw(Entity& e, float time) {
-  if (!gEntInit) { mshPart = GenMeshCube(1, 1, 1); gMatEnt = LoadMaterialDefault(); gEntInit = true; }
+  if (!gEntInit) { mshPart = GenMeshCube(1, 1, 1); gMatEnt = LoadMaterialDefault(); BuildEntityTextures(); gEntInit = true; }
   gMatEnt.shader = gGfx.world;
 
   float tw = (e.twitchT > 0) ? 1.0f : 0.0f;
   float jx = tw * frand2() * 0.06f, jz = tw * frand2() * 0.06f;
   Matrix W = MatrixMultiply(MatrixRotateY(e.facing), MatrixTranslate(e.pos.x + jx, e.pos.y, e.pos.z + jz));
+  bool agit = (e.state == EState::Pursuing || e.state == EState::Hunting);
 
   if (e.kind == EKind::Shadow) {
-    Color black = { 0, 0, 0, 255 };
+    // spectral: near-black translucent body, ragged, with a pale face floating in it
+    Color body = { 6, 6, 10, 225 };
     float swing = sinf(e.walkPhase) * Clamp(e.speed / 4.0f, 0.0f, 1.0f);
     float bob = fabsf(cosf(e.walkPhase)) * 0.06f * Clamp(e.speed / 2.0f, 0.0f, 1.0f);
-    float headTilt = tw * frand2() * 0.5f + sinf(time * 0.3f + e.walkPhase * 0.1f) * 0.08f;
-    // legs plant the ground: hips at 1.0, feet swing
-    DrawPart({ 0.13f, 1.0f, 0.13f }, { -0.12f, 0.5f + bob, 0 }, { swing * 0.55f, 0, 0 }, W, gGfx.white, black, 0);
-    DrawPart({ 0.13f, 1.0f, 0.13f }, { 0.12f, 0.5f + bob, 0 }, { -swing * 0.55f, 0, 0 }, W, gGfx.white, black, 0);
-    DrawPart({ 0.46f, 0.85f, 0.24f }, { 0, 1.4f + bob, 0 }, { 0.04f, 0, 0.03f }, W, gGfx.white, black, 0);
-    DrawPart({ 0.09f, 1.1f, 0.09f }, { -0.31f, 1.22f + bob, 0 }, { -swing * 0.5f, 0, 0.08f }, W, gGfx.white, black, 0);
-    DrawPart({ 0.09f, 1.15f, 0.09f }, { 0.31f, 1.18f + bob, 0 }, { swing * 0.5f, 0, -0.08f }, W, gGfx.white, black, 0);
-    DrawPart({ 0.21f, 0.27f, 0.22f }, { 0, 1.97f + bob, 0 }, { 0, headTilt, 0.07f }, W, gGfx.white, black, 0);
-    // its stain on the ground
-    DrawCylinderEx({ e.pos.x, 0.015f, e.pos.z }, { e.pos.x, 0.02f, e.pos.z }, 0.65f, 0.65f, 10, Fade(BLACK, 0.55f));
+    float headTilt = tw * frand2() * 0.5f + sinf(time * 0.3f) * 0.08f;
+    float waver = sinf(time * 2.0f + e.pos.x) * 0.03f;
+    BeginBlendMode(BLEND_ALPHA);
+    DrawPart({ 0.13f, 1.0f, 0.13f }, { -0.12f, 0.5f + bob, 0 }, { swing * 0.55f, 0, 0 }, W, gGfx.white, body, 0);
+    DrawPart({ 0.13f, 1.0f, 0.13f }, { 0.12f, 0.5f + bob, 0 }, { -swing * 0.55f, 0, 0 }, W, gGfx.white, body, 0);
+    DrawPart({ 0.46f, 0.9f, 0.24f }, { 0, 1.4f + bob, 0 }, { 0.04f, 0, 0.03f + waver }, W, gGfx.white, body, 0);
+    DrawPart({ 0.09f, 1.15f, 0.09f }, { -0.33f, 1.22f + bob, 0 }, { -swing * 0.6f, 0, 0.12f }, W, gGfx.white, body, 0); // long arms
+    DrawPart({ 0.09f, 1.2f, 0.09f }, { 0.33f, 1.18f + bob, 0 }, { swing * 0.6f, 0, -0.12f }, W, gGfx.white, body, 0);
+    DrawPart({ 0.20f, 0.26f, 0.21f }, { 0, 1.97f + bob, 0 }, { 0, headTilt, 0.07f }, W, gGfx.white, body, 0);
+    EndBlendMode();
+    // the face — only really visible when your light finds it
+    Vector3 head = Vector3Transform(Vector3{ 0, 1.99f + bob, 0.10f }, W);
+    DrawFace(texGhostFace, head, 0.30f, agit ? 0.92f : 0.7f);
+    DrawHair(head, 0.34f, 0.5f, 0.85f);
+    DrawCylinderEx({ e.pos.x, 0.015f, e.pos.z }, { e.pos.x, 0.02f, e.pos.z }, 0.65f, 0.65f, 10, Fade(BLACK, 0.5f));
+  } else if (e.kind == EKind::Crawler) {
+    // pale, on all fours, grinning — the under-bed thing. lunging gait.
+    Color flesh = { 198, 196, 188, 240 };
+    float lunge = sinf(e.walkPhase * 1.4f);
+    Matrix C = MatrixMultiply(MatrixRotateX(1.35f), W);
+    BeginBlendMode(BLEND_ALPHA);
+    DrawPart({ 0.44f, 1.0f, 0.34f }, { 0, 0.55f, -0.1f }, { 0, 0, lunge * 0.1f }, C, texSkin, flesh, 0.08f);
+    DrawPart({ 0.09f, 0.8f, 0.09f }, { -0.26f, 0.4f, 0.34f }, { lunge * 1.0f - 0.7f, 0, 0.2f }, W, texSkin, flesh, 0.06f);
+    DrawPart({ 0.09f, 0.8f, 0.09f }, { 0.26f, 0.4f, 0.34f }, { -lunge * 1.0f - 0.7f, 0, -0.2f }, W, texSkin, flesh, 0.06f);
+    DrawPart({ 0.10f, 0.78f, 0.10f }, { -0.17f, 0.38f, -0.7f }, { -lunge * 0.8f + 0.5f, 0, 0 }, W, texSkin, flesh, 0.05f);
+    DrawPart({ 0.10f, 0.78f, 0.10f }, { 0.17f, 0.38f, -0.7f }, { lunge * 0.8f + 0.5f, 0, 0 }, W, texSkin, flesh, 0.05f);
+    DrawPart({ 0.20f, 0.22f, 0.20f }, { 0, 0.62f, 0.5f }, { -1.0f, tw * frand2() * 0.7f, 0 }, W, texSkin, flesh, 0.07f);
+    EndBlendMode();
+    Vector3 head = Vector3Transform(Vector3{ 0, 0.62f, 0.62f }, W);
+    DrawFace(texGhostFaceGrin, head, 0.32f, 0.95f);
+    DrawHair(head, 0.40f, 0.34f, 0.9f);
   } else if (e.kind == EKind::Samara) {
-    Color gown = { 225, 228, 230, 255 };
-    Color skin = { 200, 205, 198, 255 };
-    Color hair = { 8, 8, 10, 255 };
+    Color gown = { 222, 226, 228, 245 };
+    Color skin = { 190, 196, 188, 245 };
     bool crawl = (e.state == EState::Pursuing || e.state == EState::Retreating);
-    float ph = e.walkPhase;
-    float lurch = sinf(ph) * 0.6f;
+    float lurch = sinf(e.walkPhase) * 0.6f;
+    BeginBlendMode(BLEND_ALPHA);
     if (crawl) {
-      // on all fours, spine parallel to ground, head up at you. wrong.
       Matrix C = MatrixMultiply(MatrixRotateX(1.25f), W);
       DrawPart({ 0.42f, 1.15f, 0.30f }, { 0, 0.75f, -0.15f }, { 0, 0, lurch * 0.10f }, C, texPale, gown, 0.07f);
       DrawPart({ 0.085f, 0.85f, 0.085f }, { -0.26f, 0.45f, 0.32f }, { lurch * 0.9f - 0.7f, 0, 0.2f }, W, texPale, skin, 0.05f);
       DrawPart({ 0.085f, 0.85f, 0.085f }, { 0.26f, 0.45f, 0.32f }, { -lurch * 0.9f - 0.7f, 0, -0.2f }, W, texPale, skin, 0.05f);
       DrawPart({ 0.10f, 0.8f, 0.10f }, { -0.16f, 0.4f, -0.78f }, { lurch * 0.7f + 0.5f, 0, 0 }, W, texPale, gown, 0.04f);
       DrawPart({ 0.10f, 0.8f, 0.10f }, { 0.16f, 0.4f, -0.78f }, { -lurch * 0.7f + 0.5f, 0, 0 }, W, texPale, gown, 0.04f);
-      // head snapped up through the hair
       DrawPart({ 0.20f, 0.25f, 0.21f }, { 0, 0.78f, 0.55f }, { -0.9f, tw * frand2() * 0.8f, lurch * 0.2f }, W, texPale, skin, 0.06f);
-      DrawPart({ 0.30f, 0.5f, 0.26f }, { 0, 0.72f, 0.50f }, { -0.6f, 0, 0 }, W, gGfx.white, hair, 0);
+      EndBlendMode();
+      Vector3 head = Vector3Transform(Vector3{ 0, 0.80f, 0.66f }, W);
+      DrawFace(texGhostFace, head, 0.26f, 0.85f);
+      DrawHair(head, 0.46f, 0.55f, 0.95f); // long wet hair dragging forward
     } else {
-      // rising from the well: vertical, dripping, hair curtain over the face
       float k = (e.state == EState::Emerging) ? Clamp(e.stateT / 3.6f, 0.0f, 1.0f) : 1.0f;
       DrawPart({ 0.46f, 1.45f, 0.32f }, { 0, 0.85f, 0 }, { 0.06f, 0, sinf(time * 7) * 0.02f * k }, W, texPale, gown, 0.07f);
       DrawPart({ 0.08f, 0.95f, 0.08f }, { -0.28f, 1.05f, 0 }, { 0, 0, 0.16f }, W, texPale, skin, 0.05f);
       DrawPart({ 0.08f, 0.95f, 0.08f }, { 0.28f, 1.02f, 0 }, { 0, 0, -0.20f }, W, texPale, skin, 0.05f);
       DrawPart({ 0.21f, 0.26f, 0.22f }, { 0, 1.78f, 0 }, { 0.22f, 0, tw * frand2() * 0.6f }, W, texPale, skin, 0.06f);
-      DrawPart({ 0.34f, 0.72f, 0.30f }, { 0, 1.62f, 0.05f }, { 0.1f, 0, 0 }, W, gGfx.white, hair, 0);
+      EndBlendMode();
+      Vector3 head = Vector3Transform(Vector3{ 0, 1.80f, 0.04f }, W);
+      DrawHair(head, 0.5f, 0.95f, 0.97f);   // hair curtain hides the face — dread
+      DrawFace(texGhostFace, head, 0.24f, 0.35f * k); // barely seen behind hair
     }
-  } else { // Watcher
-    Color pale = { 188, 190, 186, 255 };
-    DrawPart({ 0.30f, 1.7f, 0.20f }, { 0, 0.85f, 0 }, { 0, 0, 0.02f }, W, texPale, pale, 0.03f);
-    DrawPart({ 0.16f, 0.24f, 0.18f }, { 0, 1.86f, 0 }, { 0.1f, 0, 0.12f }, W, texPale, pale, 0.03f);
-    DrawPart({ 0.06f, 1.15f, 0.06f }, { -0.20f, 0.95f, 0 }, { 0, 0, 0.06f }, W, texPale, pale, 0.03f);
-    DrawPart({ 0.06f, 1.15f, 0.06f }, { 0.20f, 0.95f, 0 }, { 0, 0, -0.06f }, W, texPale, pale, 0.03f);
+  } else { // Watcher: pale gowned woman, hair over the face, motionless
+    Color pale = { 196, 198, 192, 235 };
+    BeginBlendMode(BLEND_ALPHA);
+    DrawPart({ 0.34f, 1.55f, 0.22f }, { 0, 0.82f, 0 }, { 0, 0, 0.02f }, W, texPale, pale, 0.03f);
+    DrawPart({ 0.16f, 0.24f, 0.18f }, { 0, 1.74f, 0 }, { 0.05f, 0, 0.06f }, W, texPale, pale, 0.03f);
+    DrawPart({ 0.06f, 1.1f, 0.06f }, { -0.22f, 0.92f, 0 }, { 0, 0, 0.06f }, W, texPale, pale, 0.03f);
+    DrawPart({ 0.06f, 1.1f, 0.06f }, { 0.22f, 0.92f, 0 }, { 0, 0, -0.06f }, W, texPale, pale, 0.03f);
+    EndBlendMode();
+    Vector3 head = Vector3Transform(Vector3{ 0, 1.76f, 0.06f }, W);
+    DrawHair(head, 0.5f, 0.8f, 0.95f);
+    DrawFace(texGhostFace, head, 0.22f, 0.4f);
   }
 }

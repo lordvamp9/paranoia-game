@@ -12,10 +12,19 @@
 static unsigned int gRng = 0x9E3779B9u;
 static inline float arand() { gRng ^= gRng << 13; gRng ^= gRng >> 17; gRng ^= gRng << 5; return (gRng & 0xFFFFFF) / 8388608.0f - 1.0f; }
 
-enum VType { V_OFF = 0, V_NOISE, V_TONE, V_GROAN, V_BREATH, V_WHISPER, V_GROWL, V_THUMP };
+enum VType { V_OFF = 0, V_NOISE, V_TONE, V_GROAN, V_BREATH, V_WHISPER, V_GROWL, V_THUMP, V_PIANO };
+enum ABus { BUS_SFX = 0, BUS_AMBIENT, BUS_VOICE, BUS_MUSIC };
+
+// per-bus gains, driven by the settings menu (atomic-ish floats)
+static volatile float gVolMaster = 0.9f, gVolMusic = 0.7f, gVolAmbient = 0.8f, gVolVoices = 1.0f;
+static volatile float gRainLvl = 0.0f, gRainTarget = 0.0f;
+static volatile float gMusicGain = 0.0f, gMusicTarget = 0.0f; // overall music swell
 
 struct Voice {
   volatile int type = V_OFF;
+  int bus = BUS_SFX;
+  // piano partials
+  float pf[6]; float pa[6]; float pp[6];
   // common
   float t = 0, dur = 0.2f, att = 0.005f, gain = 0.2f, pan = 0, rev = 0.2f;
   // filter (state-variable)
@@ -57,6 +66,15 @@ static int FindVoice() {
   return -1;
 }
 
+static inline float BusGain(int bus) {
+  switch (bus) {
+    case BUS_MUSIC: return gVolMusic;
+    case BUS_AMBIENT: return gVolAmbient;
+    case BUS_VOICE: return gVolVoices;
+    default: return 1.0f; // sfx ride master only
+  }
+}
+
 // spatialize: returns gain & pan & lp cutoff for a world position
 static void Spatial(Vector3 p, float& gain, float& pan, float& cutoff) {
   float dx = p.x - gLisX, dz = p.z - gLisZ;
@@ -79,6 +97,23 @@ static void AudioCB(void* buffer, unsigned int frames) {
   for (unsigned int i = 0; i < frames; i++) {
     float L = 0, R = 0, revL = 0, revR = 0;
 
+    gRainLvl += (gRainTarget - gRainLvl) * 0.00006f;
+    gMusicGain += (gMusicTarget - gMusicGain) * 0.00004f;
+
+    // ---- rain: dense high noise + spatial spatter, an AMBIENT bed
+    if (gRainLvl > 0.001f) {
+      float rn = arand();
+      static float rlpA = 0, rlpB = 0;
+      rlpA += 0.5f * (rn - rlpA);
+      float hiss = (rn - rlpA);
+      rlpB += 0.02f * (arand() - rlpB);
+      float body = rlpB * 2.0f;
+      float ra = gRainLvl * gVolAmbient * 0.5f;
+      L += (hiss * 0.5f + body * 0.4f) * ra;
+      R += (hiss * 0.5f - body * 0.4f + arand() * 0.1f) * ra;
+      revL += body * ra * 0.4f; revR += body * ra * 0.4f;
+    }
+
     // ---- wind: twin decorrelated brown noise through swept bandpass
     wGustT -= 1.0f / SR;
     if (wGustT <= 0) { wGustT = 2.0f + (arand() * 0.5f + 0.5f) * 5.0f; }
@@ -91,13 +126,13 @@ static void AudioCB(void* buffer, unsigned int frames) {
     wBrownR += arand() * 0.02f; wBrownR *= 0.998f;
     wLp1 += f * wBp1; float hp1 = wBrownL * 2.2f - wLp1 - 0.6f * wBp1; wBp1 += f * hp1;
     wLp2 += f * 0.93f * wBp2; float hp2 = wBrownR * 2.2f - wLp2 - 0.6f * wBp2; wBp2 += f * 0.93f * hp2;
-    float wAmp = windAmt * (0.16f + wGust * 0.22f) * (env == 0 ? 1.0f : env == 3 ? 0.4f : 0.18f);
+    float wAmp = windAmt * (0.16f + wGust * 0.22f) * (env == 0 ? 1.0f : env == 3 ? 0.4f : 0.18f) * gVolAmbient;
     L += wBp1 * wAmp; R += wBp2 * wAmp;
     revL += wBp1 * wAmp * 0.3f; revR += wBp2 * wAmp * 0.3f;
 
     // ---- low room rumble (always there, worse below)
     rumbleLp += (arand() * 0.5f - rumbleLp) * 0.002f;
-    float rumAmp = env == 2 ? 0.14f : 0.05f;
+    float rumAmp = (env == 2 ? 0.14f : 0.05f) * gVolAmbient;
     L += rumbleLp * rumAmp; R += rumbleLp * rumAmp * 0.96f;
 
     // ---- stress: ear ring + blood pressure
@@ -125,7 +160,7 @@ static void AudioCB(void* buffer, unsigned int frames) {
         s = raw * turb * V.sGain * 0.5f;
         float a = Clamp(2.0f * sinf(PI * V.sCut / SR), 0.0f, 1.0f);
         V.lpDist += a * (s - V.lpDist);
-        s = V.lpDist;
+        s = V.lpDist * BusGain(V.bus);
         float pg = V.sPan;
         L += s * (1 - fmaxf(0, pg)) ; R += s * (1 + fminf(0, pg));
         revL += s * 0.35f; revR += s * 0.35f;
@@ -192,7 +227,22 @@ static void AudioCB(void* buffer, unsigned int frames) {
           s = V.bp * envA * V.gain * (0.7f + 0.3f * sinf(k * 67.0f)); // syllables
           break;
         }
+        case V_PIANO: {
+          // struck-string: 6 inharmonic partials with independent decay +
+          // hammer-thump transient. grave when fundamental is low.
+          float body = 0;
+          for (int p = 0; p < 6; p++) {
+            V.pp[p] += V.pf[p] / SR;
+            float decay = expf(-V.t * (1.2f + p * 0.9f) / V.dur * 3.0f);
+            body += sinf(V.pp[p] * 6.28318f) * V.pa[p] * decay;
+          }
+          float hammer = (V.t < 0.012f) ? arand() * (1.0f - V.t / 0.012f) * 0.5f : 0.0f;
+          float amp = (V.t < V.att) ? V.t / V.att : 1.0f;
+          s = (body * 0.5f + hammer) * amp * V.gain * gMusicGain;
+          break;
+        }
       }
+      s *= BusGain(V.bus);
       float pg = V.pan;
       L += s * (1 - fmaxf(0, pg));
       R += s * (1 + fminf(0, pg));
@@ -217,8 +267,8 @@ static void AudioCB(void* buffer, unsigned int frames) {
     L += outRl * wet; R += outRr * wet;
 
     // ---- master soft clip
-    out[i * 2] = tanhf(L * 1.25f) * 0.92f;
-    out[i * 2 + 1] = tanhf(R * 1.25f) * 0.92f;
+    out[i * 2] = tanhf(L * 1.25f) * 0.92f * gVolMaster;
+    out[i * 2 + 1] = tanhf(R * 1.25f) * 0.92f * gVolMaster;
   }
 }
 
@@ -239,14 +289,14 @@ void AudioSetWind(float w) { gWindLvl = w; }
 void AudioSetEnv(int env) { gEnv = env; gRevFb = env == 2 ? 0.86f : env == 1 ? 0.80f : 0.74f; }
 
 static void Fire(int type, float dur, float att, float gain, float pan, float rev,
-                 float f0, float f1, float q, int band, float fr0, float fr1, int wave) {
+                 float f0, float f1, float q, int band, float fr0, float fr1, int wave, int bus = BUS_SFX) {
   int i = FindVoice();
   if (i < 0) return;
   Voice& V = gVoices[i];
   V.t = 0; V.dur = dur; V.att = att; V.gain = gain; V.pan = pan; V.rev = rev;
   V.f0 = f0; V.f1 = f1; V.q = q; V.band = band;
   V.freq0 = fr0; V.freq1 = fr1; V.wave = wave; V.phase = 0;
-  V.lp = V.bp = 0; V.wDrift = 0;
+  V.lp = V.bp = 0; V.wDrift = 0; V.bus = bus;
   V.type = type; // last: arms the voice
 }
 
@@ -269,10 +319,10 @@ void SfxBranch(float pan) {
   Fire(V_NOISE, 0.12f, 0.004f, 0.3f, pan, 0.3f, 700, 250, 1.4f, 1, 0, 0, 0);
 }
 void SfxWhisper() {
-  Fire(V_WHISPER, 1.2f + frand() * 1.4f, 0.4f, 0.05f + gStressA * 0.0006f, frand2() * 0.85f, 0.7f, 900 + frand() * 700, 0, 5, 1, 0, 0, 0);
+  Fire(V_WHISPER, 1.2f + frand() * 1.4f, 0.4f, 0.05f + gStressA * 0.0006f, frand2() * 0.85f, 0.7f, 900 + frand() * 700, 0, 5, 1, 0, 0, 0, BUS_VOICE);
 }
 void SfxDrip() {
-  Fire(V_TONE, 0.20f, 0.002f, 0.07f, frand2() * 0.3f, 0.85f, 0, 0, 1, 1, 1700 + frand() * 500, 420, 0);
+  Fire(V_TONE, 0.20f, 0.002f, 0.07f, frand2() * 0.3f, 0.85f, 0, 0, 1, 1, 1700 + frand() * 500, 420, 0, BUS_AMBIENT);
 }
 void SfxBeep(bool low) { // UI: muffled phone vibration, not a bleep
   Fire(V_THUMP, 0.10f, 0.004f, 0.18f, 0.25f, 0.05f, 0, 0, 1, 0, low ? 95.0f : 150.0f, low ? 70.0f : 130.0f, 0);
@@ -286,26 +336,63 @@ void SfxUnlock() {
   Fire(V_THUMP, 0.35f, 0.01f, 0.5f, 0, 0.45f, 0, 0, 1, 0, 120, 60, 0);
 }
 void SfxSting(float k) {
-  Fire(V_GROAN, 2.4f, 0.5f, 0.16f * k, -0.2f, 0.7f, 300, 150, 1, 1, 62, 47, 1);
-  Fire(V_GROAN, 2.6f, 0.6f, 0.13f * k, 0.25f, 0.7f, 420, 200, 1, 1, 93, 71, 1);
-  Fire(V_THUMP, 1.6f, 0.01f, 0.5f * k, 0, 0.5f, 0, 0, 1, 0, 52, 30, 0);
+  Fire(V_GROAN, 2.4f, 0.5f, 0.16f * k, -0.2f, 0.7f, 300, 150, 1, 1, 62, 47, 1, BUS_VOICE);
+  Fire(V_GROAN, 2.6f, 0.6f, 0.13f * k, 0.25f, 0.7f, 420, 200, 1, 1, 93, 71, 1, BUS_VOICE);
+  Fire(V_THUMP, 1.6f, 0.01f, 0.5f * k, 0, 0.5f, 0, 0, 1, 0, 52, 30, 0, BUS_VOICE);
 }
 void SfxScare() {
-  Fire(V_NOISE, 0.7f, 0.004f, 0.85f, 0, 0.4f, 400, 6000, 0.8f, 2, 0, 0, 0); // air slam
+  Fire(V_NOISE, 0.7f, 0.004f, 0.85f, 0, 0.4f, 400, 6000, 0.8f, 2, 0, 0, 0, BUS_VOICE); // air slam
   SfxSting(1.6f);
 }
-void SfxSamaraGroan(Vector3 at) {
+// distinct cry/scream voices per entity kind
+void SfxEntityCry(Vector3 at, int kind) {
   float g, p, c; Spatial(at, g, p, c);
-  Fire(V_GROAN, 1.8f + frand() * 0.8f, 0.25f, 0.55f * g, p, 0.6f, 380, 170, 1, 1, 130 + frand() * 40, 60, 1);
-  for (int i = 0; i < 4; i++) // bone cracks
-    Fire(V_NOISE, 0.03f, 0.001f, 0.30f * g, p + frand2() * 0.1f, 0.5f, 1900 + frand() * 900, 900, 3.0f, 1, 0, 0, 0);
+  if (kind == 1) { // Samara: drowned child wail, pitch falling
+    Fire(V_GROAN, 2.0f + frand() * 0.9f, 0.3f, 0.6f * g, p, 0.6f, 520, 200, 1, 1, 240 + frand() * 60, 70, 1, BUS_VOICE);
+    for (int i = 0; i < 5; i++) // wet bone cracks
+      Fire(V_NOISE, 0.03f, 0.001f, 0.32f * g, p + frand2() * 0.1f, 0.5f, 1900 + frand() * 900, 900, 3.0f, 1, 0, 0, 0, BUS_VOICE);
+  } else if (kind == 2) { // Watcher: high keening whine
+    Fire(V_GROAN, 1.6f, 0.5f, 0.4f * g, p, 0.75f, 1400, 800, 2, 1, 600 + frand() * 200, 300, 0, BUS_VOICE);
+  } else if (kind == 3) { // Crawler: rising distorted shriek + chittering
+    Fire(V_GROAN, 1.1f + frand() * 0.5f, 0.06f, 0.55f * g, p, 0.6f, 800, 2600, 1.8f, 1, 300, 900 + frand() * 300, 1, BUS_VOICE);
+    for (int i = 0; i < 6; i++)
+      Fire(V_NOISE, 0.02f, 0.001f, 0.25f * g, p + frand2() * 0.2f, 0.4f, 2600 + frand() * 1500, 1400, 4.0f, 1, 0, 0, 0, BUS_VOICE);
+  } else { // Shadow: low broken sob/scream
+    Fire(V_GROAN, 1.4f + frand() * 0.7f, 0.25f, 0.5f * g, p, 0.65f, 700, 300, 1.4f, 1, 150 + frand() * 80, 55, 1, BUS_VOICE);
+  }
 }
+void SfxSamaraGroan(Vector3 at) { SfxEntityCry(at, 1); }
 void SfxHeartThump(float k) {
-  Fire(V_THUMP, 0.13f, 0.005f, 0.30f * k, 0, 0.02f, 0, 0, 1, 0, 54, 38, 0);
-  Fire(V_THUMP, 0.11f, 0.005f, 0.20f * k, 0, 0.02f, 0, 0, 1, 0, 47, 33, 0);
+  Fire(V_THUMP, 0.13f, 0.005f, 0.30f * k, 0, 0.02f, 0, 0, 1, 0, 54, 38, 0, BUS_VOICE);
+  Fire(V_THUMP, 0.11f, 0.005f, 0.20f * k, 0, 0.02f, 0, 0, 1, 0, 47, 33, 0, BUS_VOICE);
 }
 void SfxBreathPlayer(float intensity) {
-  Fire(V_BREATH, 1.1f, 0.3f, 0.012f + intensity * 0.05f, 0, 0.02f, 0, 0, 1, 1, 0, 0, 0);
+  Fire(V_BREATH, 1.1f, 0.3f, 0.012f + intensity * 0.05f, 0, 0.02f, 0, 0, 1, 1, 0, 0, 0, BUS_VOICE);
+}
+void SfxThunder() {
+  Fire(V_NOISE, 2.6f, 0.02f, 0.6f, frand2() * 0.4f, 0.6f, 90, 40, 0.7f, 0, 0, 0, 0, BUS_AMBIENT);
+  Fire(V_NOISE, 1.2f, 0.005f, 0.4f, frand2() * 0.5f, 0.5f, 1800, 200, 0.9f, 0, 0, 0, 0, BUS_AMBIENT);
+}
+
+// ---------------------------------------------------------------- music
+void PianoNote(float freq, float dur, float gain, float pan) {
+  int i = FindVoice();
+  if (i < 0) return;
+  Voice& V = gVoices[i];
+  V.t = 0; V.dur = dur; V.att = 0.004f; V.gain = gain; V.pan = pan; V.rev = 0.45f;
+  V.bus = BUS_MUSIC;
+  for (int p = 0; p < 6; p++) {
+    float inh = 1.0f + p * p * 0.0008f;       // string inharmonicity
+    V.pf[p] = freq * (p + 1) * inh;
+    V.pa[p] = (p == 0 ? 1.0f : 0.62f / (p + 1)) * (0.85f + frand() * 0.3f);
+    V.pp[p] = 0;
+  }
+  V.type = V_PIANO;
+}
+void AudioSetMusicTarget(float g) { gMusicTarget = g; }
+void AudioSetRain(float r) { gRainTarget = r; }
+void AudioSetVolumes(float master, float music, float ambient, float voices) {
+  gVolMaster = master; gVolMusic = music; gVolAmbient = ambient; gVolVoices = voices;
 }
 
 int AudioEntityVoice() {

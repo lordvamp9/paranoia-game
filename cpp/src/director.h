@@ -7,12 +7,26 @@ Director gDir;
 static int gE0 = -1;            // the phase-1 watcher (scripted)
 static float gE0moveT = -1; static Vector3 gE0from, gE0to;
 static float gWatcherT = 40;    // next watcher apparition
-static float gBreathT = 0, gHeartT = 0, gWhisperT = 9, gDripT = 4;
+static float gBreathT = 0, gHeartT = 0, gWhisperT = 9, gDripT = 4, gThunderT = 8;
 static bool fired[16] = { false };
 #define FIRE(n) (!fired[n] && (fired[n] = true))
 
 static void Sub(const char* t, float sec) { gDir.sub = t; gDir.subT = sec; }
 static void Big(const char* t, float sec) { gDir.big = t; gDir.bigT = sec; }
+
+void WorldResetDynamics();
+
+void DirectorReset() {
+  gE0 = -1; gE0moveT = -1; gWatcherT = 40;
+  gBreathT = gHeartT = 0; gWhisperT = 9; gDripT = 4; gThunderT = 8;
+  for (int i = 0; i < 16; i++) fired[i] = false;
+  gEntities.clear();
+  gDir = Director{};
+  gPhone = Phone{};
+  gInv = Inventory{};
+  WorldResetDynamics();
+  MusicSetMode(MUS_OFF);
+}
 
 void DirectorStart() {
   gDir.phase = 1;
@@ -51,15 +65,19 @@ static void EnterHouse() {
   gDir.fInHouse = true;
   gPhone.objective = "FIND A WAY DOWN";
   Sub("Too quiet.", 4);
-  gDir.checkpoint = { 0, 0, -103.5f }; gDir.checkpointYaw = 0;
+  gDir.checkpoint = { 0, 0, -106.5f }; gDir.checkpointYaw = PI; // just inside, facing in
   AudioSetWind(0.25f);
-  SpawnShadow({ 4, 0, -107.5f }, { { -2, 0, -107 }, { 4, 0, -107 }, { 4.5f, 0, -112 }, { -2, 0, -112.5f } }, 0.85f, true);
-  gEntities.back().patrol.shrink_to_fit();
+  // interior stalker patrols the BACK of the house, never camps the doorway
+  SpawnShadow({ 3.5f, 0, -113.5f },
+    { { 4.2f, 0, -113.5f }, { -3.5f, 0, -113.0f }, { -4.5f, 0, -108.5f }, { 3.0f, 0, -108.0f } },
+    0.8f, true);
+  gDir.graceT = 4.0f; // a few seconds to get your bearings before it hunts
 }
 
 void DirectorCatch(Entity& e) {
-  if (gDir.catchCooldown > 0 || gDir.ended) return;
+  if (gDir.catchCooldown > 0 || gDir.graceT > 0 || gDir.ended) return;
   gDir.catchCooldown = 5;
+  gDir.graceT = 4.5f; // breathing room after respawn so it's not a death loop
   gDir.flashBlack = 1.7f;
   SfxScare();
   gDir.stress = 85;
@@ -68,7 +86,7 @@ void DirectorCatch(Entity& e) {
   for (auto& en : gEntities) {
     if (en.frozen || en.removed || !en.lethal) continue;
     if (en.kind == EKind::Samara) { if (en.state != EState::Dormant) { en.state = EState::Retreating; en.stateT = 0; } continue; }
-    en.pos = en.home; en.state = EState::Idle; en.stateT = 0;
+    en.pos = en.home; en.state = EState::Retreating; en.stateT = 0; // walk away, don't re-camp
   }
   Big(e.kind == EKind::Samara ? "SEVEN DAYS" : "IT TOUCHED YOU", 2.4f);
 }
@@ -225,6 +243,9 @@ void DirectorInteract() {
         if (!D.fKitchenKey) { SfxBeep(true); return; }
         D.fBedroomOpen = true; OpenBedroomDoor(); SfxUnlock();
         gPhone.objective = "THE MIRROR REMEMBERS";
+        SpawnCrawler({ HX - 1.5f, 0, HZ - 3.6f }); // it was under the bed
+        gEntities.back().pos.y = 3.1f; gEntities.back().home.y = 3.1f;
+        SfxEntityCry({ HX - 1.5f, 3.1f, HZ - 3.6f }, 3);
         return;
       case 7:
         if (!(D.fWaterKey || D.fMirrorSolved)) { SfxBeep(true); return; }
@@ -310,6 +331,7 @@ void DirectorUpdate(float dt, float time) {
 
   D.gameTime += dt;
   D.catchCooldown = fmaxf(0, D.catchCooldown - dt);
+  D.graceT = fmaxf(0, D.graceT - dt);
 
   if (D.phase == 1) Phase1Script(time);
   else if (D.phase == 2) Phase2Script();
@@ -444,4 +466,25 @@ void DirectorUpdate(float dt, float time) {
   else if (inCabin) env = 3;
   AudioSetEnv(env);
   AudioSetStress(D.stress);
+
+  // ---- music director: chase > tension > silence
+  bool indoorHouse = (env == 1 || env == 2);
+  if (pursuit) MusicSetMode(MUS_CHASE);
+  else if (samaraOut || D.stress > 55 || (nearest < 12 && !inCabin)) MusicSetMode(MUS_TENSION);
+  else MusicSetMode(MUS_OFF);
+  MusicTick(dt);
+
+  // ---- rain & thunder: heavy outdoors, muffled inside, gone in the basement
+  float rainTarget = (env == 2) ? 0.05f : (env == 1) ? 0.32f : (env == 3) ? 0.4f : 1.0f;
+  AudioSetRain(rainTarget);
+  D.rainVisual += ((env == 0 ? 1.0f : 0.0f) - D.rainVisual) * fminf(1, dt * 2);
+  if (env != 2) {
+    gThunderT -= dt;
+    if (gThunderT <= 0) {
+      gThunderT = 14 + frand() * 26;
+      SfxThunder();
+      D.flashWhite = fmaxf(D.flashWhite, 0.18f); // distant lightning
+      D.stress += 2;
+    }
+  }
 }

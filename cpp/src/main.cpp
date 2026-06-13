@@ -1,24 +1,42 @@
-// PARANOIA v2 — native build. a game by vamp9.
+// PARANOIA v3 — native build. a game by vamp9.
 // Unity build: every module is included into this translation unit.
 #include "game.h"
 #include "shaders.h"
 #include "gfx.h"
+#include "config.h"
 #include "world.h"
 #include "house.h"
 #include "player.h"
 #include "audio.h"
+#include "music.h"
 #include "phone.h"
 #include "entity.h"
 #include "director.h"
+#include "ui.h"
+
+static void BeginPlay() {
+  DirectorReset();
+  PlayerTeleport(0, 200, 0);
+  gPlayer.pitch = 0;
+  gPlayer.enabled = true;
+  DirectorStart();
+  gState = GS_PLAY;
+  gStateT = 0;
+  DisableCursor();
+}
 
 int main(int argc, char** argv) {
-  // ---- args (debug/verification tooling)
-  bool shotMode = false, windowed = false;
+  bool shotMode = false, windowed = false, probeMode = false;
   const char* shotFile = "shot.png";
+  const char* uiShot = nullptr; int uiState = GS_MENU;
   float sx = 0, sz = 200, syaw = 0, spitch = 0, sground = 0;
   int shotFrames = 45;
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--windowed")) windowed = true;
+    if (!strcmp(argv[i], "--probe")) probeMode = true;
+    if (!strcmp(argv[i], "--frames") && i + 1 < argc) shotFrames = atoi(argv[i + 1]);
+    if (!strcmp(argv[i], "--uishot") && i + 2 < argc) { uiShot = argv[i + 1]; uiState = atoi(argv[i + 2]); }
+    if (!strcmp(argv[i], "--portrait") && i + 2 < argc) { uiShot = argv[i + 1]; uiState = 100 + atoi(argv[i + 2]); }
     if (!strcmp(argv[i], "--shot") && i + 5 < argc) {
       shotMode = true;
       shotFile = argv[i + 1];
@@ -26,7 +44,6 @@ int main(int argc, char** argv) {
       syaw = (float)atof(argv[i + 4]); spitch = (float)atof(argv[i + 5]);
       if (i + 6 < argc) sground = (float)atof(argv[i + 6]);
     }
-    if (!strcmp(argv[i], "--frames") && i + 1 < argc) shotFrames = atoi(argv[i + 1]);
   }
 
   SetTraceLogLevel(LOG_WARNING);
@@ -37,8 +54,9 @@ int main(int argc, char** argv) {
   SetRandomSeed(0x9A4F0911u);
 
   GfxInit();
+  CfgLoad();
   WorldBuild();
-  if (!shotMode) AudioInit();
+  if (!shotMode) { AudioInit(); AudioSetVolumes(gCfg.volMaster, gCfg.volMusic, gCfg.volAmbient, gCfg.volVoices); }
 
   gPlayer.cam.position = { 0, EYE_H, 200 };
   gPlayer.cam.target = { 0, EYE_H, 199 };
@@ -47,18 +65,13 @@ int main(int argc, char** argv) {
   gPlayer.cam.projection = CAMERA_PERSPECTIVE;
   PlayerTeleport(0, 200, 0);
 
-  bool probeMode = false;
-  for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--probe")) probeMode = true;
+  // -------- probe: headless logic checks --------
   if (probeMode) {
-    gMenuActive = false;
+    gState = GS_PLAY;
     DirectorStart();
     gDir.catchCooldown = 1e9f;
     int pass = 0, fail = 0;
-    auto CHECK = [&](const char* name, bool ok) {
-      printf("[%s] %s\n", ok ? "PASS" : "FAIL", name);
-      if (ok) pass++; else fail++;
-    };
-    // walk up the main stairs
+    auto CHECK = [&](const char* name, bool ok) { printf("[%s] %s\n", ok ? "PASS" : "FAIL", name); if (ok) pass++; else fail++; };
     gPlayer.groundY = 0;
     for (float z = -110.3f; z >= -114.7f; z -= 0.2f) gPlayer.groundY = ResolveGround(-5, z, gPlayer.groundY);
     CHECK("stairs up -> 3.1", fabsf(gPlayer.groundY - 3.1f) < 0.15f);
@@ -70,71 +83,47 @@ int main(int argc, char** argv) {
     for (float z = -110.4f; z >= -114.7f; z -= 0.2f) gPlayer.groundY = ResolveGround(5, z, gPlayer.groundY);
     CHECK("basement stairs -> -2.5", fabsf(gPlayer.groundY + 2.5f) < 0.15f);
     CHECK("basement room", fabsf(ResolveGround(0, -112, gPlayer.groundY) + 2.5f) < 0.05f);
-    // water key pickup
-    gDir.phase = 2;
-    gPlayer.groundY = 0;
-    PlayerTeleport(gWorld.waterKeyP.x + 0.4f, gWorld.waterKeyP.z, 0);
-    gPhone.lightOn = true;
-    DirectorInteract();
-    CHECK("water key pickup", gDir.fWaterKey && gInv.has[IT_WATERKEY]);
-    // cabin code
-    gDir.codeBuffer = "";
-    DirectorKey(KEY_TWO); DirectorKey(KEY_SEVEN); DirectorKey(KEY_FOUR); DirectorKey(KEY_ONE);
+    { float wx = 0, wz = -101; for (int s = 0; s < 240; s++) { wz -= 0.05f; Collide(wx, wz, 0); }
+      CHECK("walk through front door", wz < -107.0f && fabsf(wx) < 1.5f); }
+    gDir.phase = 2; gPlayer.groundY = 0;
+    PlayerTeleport(gWorld.waterKeyP.x + 0.4f, gWorld.waterKeyP.z, 0); gPhone.lightOn = true;
+    DirectorInteract(); CHECK("water key pickup", gDir.fWaterKey && gInv.has[IT_WATERKEY]);
+    gDir.codeBuffer = ""; DirectorKey(KEY_TWO); DirectorKey(KEY_SEVEN); DirectorKey(KEY_FOUR); DirectorKey(KEY_ONE);
     CHECK("cabin code 2741", gDir.fCabinOpen);
-    // kitchen drawer two-step
     gDir.fInHouse = true;
     PlayerTeleport(gWorld.kitchenDrawer.x - 0.6f, gWorld.kitchenDrawer.z, 0);
-    DirectorInteract(); DirectorInteract();
-    CHECK("kitchen key", gDir.fKitchenKey && gInv.has[IT_KITCHENKEY]);
-    // bedroom door + basement door
-    gPlayer.groundY = 3.1f;
-    PlayerTeleport(gWorld.bedroomDoorP.x + 0.8f, gWorld.bedroomDoorP.z, 0);
-    DirectorInteract();
-    CHECK("bedroom unlock", gDir.fBedroomOpen);
-    gPlayer.groundY = 0;
-    PlayerTeleport(gWorld.basementDoorP.x, gWorld.basementDoorP.z + 1.0f, 0);
-    DirectorInteract();
-    CHECK("basement unlock (water key)", gDir.fBasementOpen);
-    // mirror puzzle
-    gDir.fMirrorSolved = false;
-    gPlayer.groundY = 3.1f;
+    DirectorInteract(); DirectorInteract(); CHECK("kitchen key", gDir.fKitchenKey && gInv.has[IT_KITCHENKEY]);
+    gPlayer.groundY = 3.1f; PlayerTeleport(gWorld.bedroomDoorP.x + 0.8f, gWorld.bedroomDoorP.z, 0);
+    DirectorInteract(); CHECK("bedroom unlock", gDir.fBedroomOpen);
+    gPlayer.groundY = 0; PlayerTeleport(gWorld.basementDoorP.x, gWorld.basementDoorP.z + 1.0f, 0);
+    DirectorInteract(); CHECK("basement unlock (water key)", gDir.fBasementOpen);
+    gDir.fMirrorSolved = false; gPlayer.groundY = 3.1f;
     PlayerTeleport(gWorld.mirrorSpot.x, gWorld.mirrorSpot.z, -PI / 2);
     for (int f = 0; f < 200; f++) DirectorUpdate(1.0f / 60.0f, f / 60.0f);
     CHECK("mirror puzzle solve", gDir.fMirrorSolved);
-    // false wall + truth + note
-    gDir.fBasementOnce = true;
-    gPlayer.groundY = -2.5f;
-    PlayerTeleport(-3.2f, -110.4f, PI / 2);
-    DirectorInteract();
-    CHECK("false wall opens", gDir.fHiddenOpen);
+    gDir.fBasementOnce = true; gPlayer.groundY = -2.5f;
+    PlayerTeleport(-3.2f, -110.4f, PI / 2); DirectorInteract(); CHECK("false wall opens", gDir.fHiddenOpen);
     PlayerTeleport(gWorld.oldPhoneP.x + 0.4f, gWorld.oldPhoneP.z, PI / 2);
-    DirectorInteract();
-    CHECK("truth (recording)", gDir.fTruth && gPhone.battery >= 99);
-    DirectorInteract();
-    CHECK("note pending", gDir.fNotePending);
-    DirectorInteract();
-    CHECK("note read", gDir.fNoteRead);
-    // battery item use
-    gInv.has[IT_BATTERY] = true; gInv.batteries = 1; gPhone.battery = 30;
-    InvSelect(4);
+    DirectorInteract(); CHECK("truth (recording)", gDir.fTruth && gPhone.battery >= 99);
+    DirectorInteract(); CHECK("note pending", gDir.fNotePending);
+    DirectorInteract(); CHECK("note read", gDir.fNoteRead);
+    gInv.has[IT_BATTERY] = true; gInv.batteries = 1; gPhone.battery = 30; InvSelect(4);
     CHECK("battery swap +50", gPhone.battery > 79);
-    // samara trigger
-    gPlayer.groundY = 0;
-    PlayerTeleport(gWorld.well.x, gWorld.well.z + 4.0f, 0);
+    gPlayer.groundY = 0; PlayerTeleport(gWorld.well.x, gWorld.well.z + 4.0f, 0);
     for (int f = 0; f < 60; f++) DirectorUpdate(1.0f / 60.0f, f / 60.0f);
-    bool samaraUp = false;
-    for (auto& e : gEntities) if (e.kind == EKind::Samara && e.state != EState::Dormant) samaraUp = true;
+    bool samaraUp = false; for (auto& e : gEntities) if (e.kind == EKind::Samara && e.state != EState::Dormant) samaraUp = true;
     CHECK("samara emerges", samaraUp);
-    // ending refuse
-    DirectorKey(KEY_Q);
-    CHECK("ending refuse", gDir.ended && gDir.ending == 2);
+    DirectorKey(KEY_Q); CHECK("ending refuse", gDir.ended && gDir.ending == 2);
+    // reset path
+    DirectorReset(); CHECK("reset clears entities", gEntities.empty() && !gDir.fWaterKey);
     printf("== %d pass, %d fail ==\n", pass, fail);
     CloseWindow();
     return fail > 0 ? 1 : 0;
   }
 
+  // -------- shot: auto-screenshot --------
   if (shotMode) {
-    gMenuActive = false;
+    gState = GS_PLAY;
     DirectorStart();
     gDir.catchCooldown = 1e9f;
     gPlayer.groundY = sground;
@@ -158,55 +147,102 @@ int main(int argc, char** argv) {
     return 0;
   }
 
+  // -------- entity portrait --------
+  if (uiShot && uiState >= 100) {
+    int kind = uiState - 100;
+    gState = GS_PLAY;
+    gPhone.lightOn = true; gPhone.battery = 100;
+    PlayerTeleport(0, 0, 0); gPlayer.pitch = 0; gPlayer.groundY = 0;
+    Entity e;
+    e.pos = { 0, 0, -3.4f }; e.home = e.pos; e.facing = 0; e.visible = true; e.frozen = true;
+    e.state = (kind == 1) ? EState::Pursuing : EState::Idle; // samara crawling
+    if (kind == 0) e.kind = EKind::Shadow;
+    else if (kind == 1) { e.kind = EKind::Samara; e.walkPhase = 1.2f; }
+    else if (kind == 2) e.kind = EKind::Watcher;
+    else e.kind = EKind::Crawler;
+    gEntities.push_back(e);
+    for (int f = 0; f < 4; f++) { PlayerUpdate(1.0f / 60.0f, 0); gDir.flashBlack = 0; PhoneDrawScreen(0.5f, 20); GfxRenderFrame(1.2f, 1.0f / 60.0f); }
+    TakeScreenshot(uiShot);
+    CloseWindow();
+    return 0;
+  }
+
+  // -------- ui screenshot --------
+  if (uiShot) {
+    gState = uiState; gStateT = (uiState == GS_INTRO) ? 5.4f : 2.0f;
+    if (uiState == GS_PAUSE || uiState == GS_SETTINGS) { DirectorStart(); gState = uiState; gDir.flashBlack = 0; }
+    for (int f = 0; f < 4; f++) { gDir.flashBlack = 0; PhoneDrawScreen(0.5f, 0); GfxRenderFrame(0.5f, 1.0f / 60.0f); }
+    TakeScreenshot(uiShot);
+    CloseWindow();
+    return 0;
+  }
+
+  // -------- normal --------
+  EnableCursor();
+  MusicSetMode(MUS_MENU);
+  int prevState = -1;
   float time = 0;
-  bool started = false;
-  while (!WindowShouldClose()) {
+  while (!WindowShouldClose() && !gReqQuit) {
     float dt = fminf(0.05f, GetFrameTime());
     time += dt;
+    gStateT += dt;
 
-    if (gMenuActive) {
-      if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER)) {
-        gMenuActive = false;
-        started = true;
-        DisableCursor();
-        gPlayer.enabled = true;
-        DirectorStart();
-      }
-      // idle menu camera: stand at spawn, slow breathing
-      gPlayer.swayT += dt;
-    } else if (started) {
-      // input routed to director first (codes, endings)
-      int k = GetKeyPressed();
-      while (k) { DirectorKey(k); k = GetKeyPressed(); }
-      if (IsKeyPressed(KEY_F) && gPhone.battery > 0) {
-        gPhone.lightOn = !gPhone.lightOn;
-        SfxBeep(!gPhone.lightOn);
-      }
-      if (IsKeyPressed(KEY_E)) DirectorInteract();
-      for (int s = 0; s < 5; s++)
-        if (IsKeyPressed(KEY_ONE + s)) InvSelect(s);
-      if (IsKeyPressed(KEY_F11)) ToggleBorderlessWindowed();
-      if (IsKeyPressed(KEY_ESCAPE)) {
-        if (gDir.credits) break;
-        if (IsCursorHidden()) EnableCursor(); else DisableCursor();
-      }
-      if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && !IsCursorHidden()) DisableCursor();
+    // state-entry hooks
+    if (gState != prevState) {
+      if (gState == GS_MENU) { EnableCursor(); MusicSetMode(MUS_MENU); }
+      else if (gState == GS_PLAY) { DisableCursor(); }
+      else if (gState == GS_PAUSE || gState == GS_SETTINGS) { EnableCursor(); }
+      else if (gState == GS_CREDITS) { EnableCursor(); }
+      prevState = gState;
     }
 
-    PlayerUpdate(dt, gDir.stress);
-    if (started) DirectorUpdate(dt, time);
-    InvUpdate(dt);
-    bool indoor = (gPlayer.groundY < -1.0f) ||
-      (fabsf(gPlayer.pos.x) < 6.5f && fabsf(gPlayer.pos.z + 110) < 5.5f) ||
-      (fabsf(gPlayer.pos.x - 60) < 3.0f && fabsf(gPlayer.pos.z + 30) < 2.4f);
-    PhoneUpdate(dt, time, indoor, gDir.entitiesNear, gDir.stress);
-    WorldTick(dt, time);
-    AudioSetListener(gPlayer.pos, gPlayer.yaw);
+    // restart requested (exit to menu)
+    if (gReqRestart) { gReqRestart = false; DirectorReset(); PlayerTeleport(0, 200, 0); gPlayer.enabled = false; gState = GS_MENU; prevState = -1; }
+
+    // ---- per-state input & updates
+    if (gState == GS_PLAY) {
+      int k = GetKeyPressed();
+      while (k) { DirectorKey(k); k = GetKeyPressed(); }
+      if (ActPressed(ACT_LIGHT) && gPhone.battery > 0) { gPhone.lightOn = !gPhone.lightOn; SfxBeep(!gPhone.lightOn); }
+      if (ActPressed(ACT_INTERACT)) DirectorInteract();
+      for (int s = 0; s < 5; s++) if (IsKeyPressed(KEY_ONE + s)) InvSelect(s);
+      if (IsKeyPressed(KEY_F11)) ToggleBorderlessWindowed();
+      if (IsKeyPressed(KEY_ESCAPE)) { gState = GS_PAUSE; gStateT = 0; }
+
+      PlayerUpdate(dt, gDir.stress);
+      DirectorUpdate(dt, time);
+      InvUpdate(dt);
+      bool indoor = (gPlayer.groundY < -1.0f) ||
+        (fabsf(gPlayer.pos.x) < 6.5f && fabsf(gPlayer.pos.z + 110) < 5.5f) ||
+        (fabsf(gPlayer.pos.x - 60) < 3.0f && fabsf(gPlayer.pos.z + 30) < 2.4f);
+      PhoneUpdate(dt, time, indoor, gDir.entitiesNear, gDir.stress);
+      WorldTick(dt, time);
+      AudioSetListener(gPlayer.pos, gPlayer.yaw);
+      if (gDir.credits) { gState = GS_CREDITS; gStateT = 0; }
+    } else if (gState == GS_INTRO) {
+      MusicTick(dt);
+      PlayerUpdate(dt, 0); // keep camera valid at spawn
+      if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER) || IsKeyPressed(KEY_SPACE) || gStateT > 27.0f)
+        BeginPlay();
+    } else if (gState == GS_MENU) {
+      MusicTick(dt);
+      PlayerUpdate(dt, 0);
+    } else if (gState == GS_PAUSE) {
+      if (IsKeyPressed(KEY_ESCAPE)) { gState = GS_PLAY; }
+      // world frozen; keep camera
+    } else if (gState == GS_SETTINGS) {
+      if (IsKeyPressed(KEY_ESCAPE) && gRebindAction < 0) { CfgSave(); gState = gFromPause ? GS_PAUSE : GS_MENU; }
+    } else if (gState == GS_CREDITS) {
+      if (IsKeyPressed(KEY_ENTER)) { gReqRestart = true; }
+      if (IsKeyPressed(KEY_ESCAPE)) break;
+    }
+
     PhoneDrawScreen(time, gDir.stress);
     GfxRenderFrame(time, dt);
   }
 
-  if (!shotMode) AudioClose();
+  AudioClose();
+  CfgSave();
   CloseWindow();
   return 0;
 }

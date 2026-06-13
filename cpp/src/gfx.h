@@ -175,9 +175,11 @@ void GfxRenderFrame(float time, float dt) {
   WorldDraw(false, time);
   for (auto& e : gEntities) if (!e.removed && e.visible) EntityDraw(e, time);
   // hand + phone always on top: clear depth so they never clip the world
-  rlDrawRenderBatchActive();
-  glClearDepthHack();
-  HandDraw(time, gDir.stress);
+  if (gState == GS_PLAY || gState == GS_PAUSE) {
+    rlDrawRenderBatchActive();
+    glClearDepthHack();
+    HandDraw(time, gDir.stress);
+  }
   EndMode3D();
   HudDraw(time, gDir.stress);
   EndTextureMode();

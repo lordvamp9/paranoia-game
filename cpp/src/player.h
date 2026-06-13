@@ -6,7 +6,7 @@
 Player gPlayer;
 
 static const float EYE_H = 1.62f;
-static const float P_RADIUS = 0.32f;
+static const float P_RADIUS = 0.30f;
 static const float WALK_SPD = 3.2f;
 static const float SPRINT_SPD = 5.8f;
 
@@ -78,15 +78,16 @@ void PlayerUpdate(float dt, float stress) {
   Player& P = gPlayer;
   if (P.enabled) {
     Vector2 md = GetMouseDelta();
-    P.yaw -= md.x * 0.0021f;
-    P.pitch = Clamp(P.pitch - md.y * 0.0021f, -1.45f, 1.45f);
+    float sens = 0.0021f * gCfg.mouseSens * 2.0f; // slider 0.5 = default speed
+    P.yaw -= md.x * sens;
+    P.pitch = Clamp(P.pitch - md.y * sens, -1.45f, 1.45f);
 
     float fwd = 0, str = 0;
-    if (IsKeyDown(KEY_W) || IsKeyDown(KEY_UP)) fwd += 1;
-    if (IsKeyDown(KEY_S) || IsKeyDown(KEY_DOWN)) fwd -= 1;
-    if (IsKeyDown(KEY_A) || IsKeyDown(KEY_LEFT)) str -= 1;
-    if (IsKeyDown(KEY_D) || IsKeyDown(KEY_RIGHT)) str += 1;
-    bool wantSprint = (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)) && fwd > 0;
+    if (ActDown(ACT_FWD) || IsKeyDown(KEY_UP)) fwd += 1;
+    if (ActDown(ACT_BACK) || IsKeyDown(KEY_DOWN)) fwd -= 1;
+    if (ActDown(ACT_LEFT) || IsKeyDown(KEY_LEFT)) str -= 1;
+    if (ActDown(ACT_RIGHT) || IsKeyDown(KEY_RIGHT)) str += 1;
+    bool wantSprint = ActDown(ACT_SPRINT) && fwd > 0;
 
     // stamina: you cannot run forever; they count on that
     if (wantSprint && !P.exhausted && P.stamina > 0) {

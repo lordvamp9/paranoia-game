@@ -6,3 +6,8 @@ Thumbs.db
 cpp/*.exe
 cpp/*.res
 cpp/shot_*.png
+cpp/p_*.png
+cpp/e_*.png
+cpp/ui_*.png
+cpp/ingame_*.png
+cpp/paranoia.cfg

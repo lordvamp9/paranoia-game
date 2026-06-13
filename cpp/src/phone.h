@@ -261,56 +261,18 @@ void HandDraw(float time, float stress) {
 }
 
 // ---------------------------------------------------------------- 2D HUD
-bool gMenuActive = true;
-
 void HudDraw(float time, float stress) {
-  if (gMenuActive) {
-    DrawRectangle(0, 0, INTERNAL_W, INTERNAL_H, Fade(BLACK, 0.55f));
-    const char* title = "P A R A N O I A";
-    Vector2 m = MeasureTextEx(gGfx.font, title, 42, 10);
-    float fl = (sinf(time * 1.1f) > 0.96f) ? 0.35f : 1.0f;
-    DrawTextEx(gGfx.font, title, { (INTERNAL_W - m.x) / 2, 84 }, 42, 10, Fade(Color{ 184, 184, 184, 255 }, fl));
-    const char* sub2 = "YOU ARE BEING OBSERVED";
-    m = MeasureTextEx(gGfx.font, sub2, 11, 5);
-    DrawTextEx(gGfx.font, sub2, { (INTERNAL_W - m.x) / 2, 136 }, 11, 5, Color{ 95, 80, 80, 255 });
-    const char* go = "PRESS  ENTER";
-    m = MeasureTextEx(gGfx.font, go, 16, 4);
-    if (sinf(time * 2.4f) > -0.3f)
-      DrawTextEx(gGfx.font, go, { (INTERNAL_W - m.x) / 2, 210 }, 16, 4, Color{ 200, 200, 208, 255 });
-    const char* keys = "WASD MOVE   MOUSE LOOK   SHIFT RUN   F LIGHT   E INTERACT   1-5 ITEMS";
-    m = MeasureTextEx(gGfx.font, keys, 9, 2);
-    DrawTextEx(gGfx.font, keys, { (INTERNAL_W - m.x) / 2, 268 }, 9, 2, Color{ 70, 70, 78, 255 });
-    const char* hp = "HEADPHONES STRONGLY RECOMMENDED";
-    m = MeasureTextEx(gGfx.font, hp, 9, 2);
-    DrawTextEx(gGfx.font, hp, { (INTERNAL_W - m.x) / 2, 286 }, 9, 2, Color{ 70, 60, 60, 255 });
-    const char* br = "vamp9 - MMXXVI";
-    m = MeasureTextEx(gGfx.font, br, 9, 2);
-    DrawTextEx(gGfx.font, br, { (INTERNAL_W - m.x) / 2, INTERNAL_H - 22.0f }, 9, 2, Color{ 52, 52, 52, 255 });
-    return;
-  }
-  if (gDir.credits) {
-    DrawRectangle(0, 0, INTERNAL_W, INTERNAL_H, BLACK);
-    const char* title = "P A R A N O I A";
-    Vector2 m = MeasureTextEx(gGfx.font, title, 30, 8);
-    DrawTextEx(gGfx.font, title, { (INTERNAL_W - m.x) / 2, 70 }, 30, 8, Color{ 200, 196, 191, 255 });
-    const char* end = gDir.ending == 1 ? "ENDING - TRUST ME" : "ENDING - REJECT TRUTH";
-    m = MeasureTextEx(gGfx.font, end, 12, 3);
-    DrawTextEx(gGfx.font, end, { (INTERNAL_W - m.x) / 2, 116 }, 12, 3, Color{ 106, 64, 64, 255 });
-    const char* blurb = gDir.ending == 1
-      ? "You stepped through the door it offered.\nThe recording continues. It always was you."
-      : "The screen died. The dark is full of breathing.\nThey no longer need the camera to watch you.";
-    m = MeasureTextEx(gGfx.font, blurb, 11, 2);
-    DrawTextEx(gGfx.font, blurb, { (INTERNAL_W - m.x) / 2, 160 }, 11, 2, Color{ 119, 119, 119, 255 });
-    const char* by = "a game by vamp9";
-    m = MeasureTextEx(gGfx.font, by, 13, 3);
-    DrawTextEx(gGfx.font, by, { (INTERNAL_W - m.x) / 2, 230 }, 13, 3, Color{ 170, 170, 170, 255 });
-    const char* pc = "design - code - sound: procedural, like everything else you saw";
-    m = MeasureTextEx(gGfx.font, pc, 9, 2);
-    DrawTextEx(gGfx.font, pc, { (INTERNAL_W - m.x) / 2, 252 }, 9, 2, Color{ 68, 68, 68, 255 });
-    const char* q = "[ESC] QUIT";
-    m = MeasureTextEx(gGfx.font, q, 11, 2);
-    DrawTextEx(gGfx.font, q, { (INTERNAL_W - m.x) / 2, 300 }, 11, 2, Color{ 85, 85, 85, 255 });
-    return;
+  if (gState != GS_PLAY) { UIDrawOverlay(time); return; }
+
+  // rain streaks (screen-space, outdoors) — sells the storm with the dither
+  if (gDir.rainVisual > 0.02f) {
+    int n = (int)(gDir.rainVisual * 90);
+    for (int i = 0; i < n; i++) {
+      float rx = fmodf(i * 53.7f + time * 220.0f * (0.6f + (i % 5) * 0.12f), (float)INTERNAL_W);
+      float ry = fmodf(i * 97.3f + time * 540.0f * (0.7f + (i % 7) * 0.1f), (float)INTERNAL_H);
+      float len = 7 + (i % 5) * 3;
+      DrawLineEx({ rx, ry }, { rx - 1.5f, ry + len }, 1.0f, Fade(Color{ 170, 180, 200, 255 }, 0.18f * gDir.rainVisual));
+    }
   }
   // inventory bar
   const char* names[5] = { "PHONE", "KEY", "KEY-2", "NOTE", "BATT" };

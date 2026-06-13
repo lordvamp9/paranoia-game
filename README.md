@@ -18,14 +18,15 @@ in your hand.
 
 ## 🎮 Download & Play
 
-Grab **`PARANOIA-v2.0.0-win64.exe`** from
+Grab **`PARANOIA-v3.0.0-win64.exe`** from
 [**Releases**](https://github.com/lordvamp9/paranoia-game/releases) — a single
-**2.7 MB** portable executable, no installation required. Double-click and play.
+portable executable, no installation required. Double-click and play.
 
-> v2.0.0 is the native **C++ rewrite** (raylib/OpenGL): dithered photoreal
-> aesthetic, inventory, real movement physics, Samara's well, cinematic
-> procedural audio. The original Three.js/Electron build remains available
-> as release v1.0.0.
+> **v3.0.0** is the full game: main menu, an intro cinematic (the crash, the
+> amnesia), a pause menu with a real settings screen (audio buses + rebindable
+> controls), piano score, rain & thunder, four spectral entity types with their
+> own cries, and a fully explorable house. Native **C++ / raylib**. The
+> Three.js/Electron prototype remains as v1.0.0.
 
 > 🎧 **Headphones strongly recommended.** The audio is 3D-positional — you will
 > hear them before you see them.
@@ -68,7 +69,30 @@ Grab **`PARANOIA-v2.0.0-win64.exe`** from
 
 ## 🛠 Tech
 
-### v2.0.0 — native C++ (current)
+### v3.0.0 — full game (current)
+
+Built on the v2 C++/raylib core, adds:
+
+- **Front-end & flow:** main menu → intro cinematic (car crash + amnesia lore,
+  melancholic piano) → game, with an ESC **pause menu** (Resume / Settings /
+  Exit) that freezes the world.
+- **Settings:** audio buses (master / music / ambient / voices), mouse
+  sensitivity, and **fully rebindable controls**, all persisted to `paranoia.cfg`.
+- **Music:** a synthesized piano score — grave dissonant clusters when hunted,
+  a driving low ostinato during chases, a minor-key lament under the intro.
+- **Weather:** rain and distant thunder with lightning flashes, layered into the
+  fog; muffled indoors, gone in the basement.
+- **Entity roster (reworked, spectral):** translucent **Shadows** with pale
+  faces and trailing hair; pale **Watchers** that vanish when your light finds
+  them; a grinning **Crawler** that comes out from under the bed and follows you
+  across floors; and **Samara**, who climbs out of the well the crossroad sign
+  warns you about and crawls after you in lurches. Each has its own cries.
+- **Fixes:** the white house is fully enterable and explorable (the doorway/
+  collision and the death-loop entity bugs are gone), the path no longer breaks
+  or grows trees through it, and the well now sits in its own dead-tree clearing
+  reached by a branching trail.
+
+### v2.0.0 — native C++ core
 
 **C++17 + [raylib](https://www.raylib.com/) 6.0 (OpenGL 3.3)**, compiled with
 MinGW-w64 GCC into a single static 2.7 MB exe. Everything is still procedural —

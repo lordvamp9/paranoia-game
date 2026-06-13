@@ -6,6 +6,18 @@ World gWorld;
 
 float pathX(float z) { return 6.0f * sinf((200.0f - z) * 0.055f); }
 
+// the actual centre of the walked path at any z (phase-1 winding, then a
+// straight run to the house through the forest). used to keep it clear.
+float pathLine(float z) {
+  if (z > 55.0f) return pathX(z);
+  return pathX(55.0f) * (z + 88.0f) / 143.0f;
+}
+// distance from (x,z) to the nearest point of the path (approx, vertical band)
+static float distToPath(float x, float z) {
+  if (z < -90.0f || z > 207.0f) return 999.0f;
+  return fabsf(x - pathLine(z));
+}
+
 static int AddItem(Mesh mesh, Matrix tr, Texture2D tex, Color tint, float spec = 0, bool shadow = true, float emis = 0, float fogMin = 0) {
   DrawItem d; d.mesh = mesh; d.transform = tr; d.tex = tex; d.tint = tint;
   d.specular = spec; d.castShadow = shadow; d.emis = emis; d.fogMin = fogMin;
@@ -169,12 +181,16 @@ static void BuildForest() {
   }
 
   auto reject = [](float x, float z) {
-    if (z > 58) { float d = fabsf(x - pathX(z)); return d < 4.5f || d > 42.0f; }
+    // never block the walked path, anywhere along its length
+    if (distToPath(x, z) < 4.0f) return true;
+    if (z > 58) { float d = fabsf(x - pathX(z)); return d > 42.0f; } // phase-1 corridor edge
     if (Vector2Distance({ x, z }, { gWorld.fountain.x, gWorld.fountain.z }) < 7) return true;
     if (Vector2Distance({ x, z }, { gWorld.sign.x, gWorld.sign.z }) < 5) return true;
     if (Vector2Distance({ x, z }, { gWorld.cabin.x, gWorld.cabin.z }) < 9) return true;
     if (Vector2Distance({ x, z }, { gWorld.housePos.x, gWorld.housePos.z }) < 22) return true;
-    if (Vector2Distance({ x, z }, { gWorld.well.x, gWorld.well.z }) < 6) return true;
+    if (Vector2Distance({ x, z }, { gWorld.well.x, gWorld.well.z }) < 12) return true;
+    // the branch path to the well (crossroad -> west to the well clearing)
+    if (z < -8 && z > -54 && fabsf(x - (gWorld.sign.x + (gWorld.well.x - gWorld.sign.x) * (z + 8) / -44.0f)) < 3.5f) return true;
     if (z < -88 && fabsf(x) < 12) return true;
     return false;
   };
@@ -210,46 +226,71 @@ static void BuildForest() {
 
   InstancedSet grass{ mshGrass, texGrassT, Color{ 200, 215, 195, 255 }, 0.0f };
   grass.sway = true;
-  for (int i = 0; i < 4200; i++) {
-    float z = -140 + frand() * 350;
-    float x = -130 + frand() * 260;
-    if (z > 58 && fabsf(x - pathX(z)) < 2.2f) continue;       // keep path clear
+  for (int i = 0; i < 9000; i++) {
+    float z = -150 + frand() * 372;
+    float x = -135 + frand() * 270;
+    if (distToPath(x, z) < 1.6f) continue;                    // keep path clear
     if (fabsf(x) < 7.5f && fabsf(z + 110) < 6.5f) continue;   // house
     if (Vector2Distance({ x, z }, { gWorld.cabin.x, gWorld.cabin.z }) < 3.5f) continue;
-    float s = 0.6f + frand() * 1.1f;
+    if (Vector2Distance({ x, z }, { gWorld.well.x, gWorld.well.z }) < 2.0f) continue;
+    float s = 0.6f + frand() * 1.2f;
     grass.mats.push_back(MTRS({ x, 0, z }, frand() * 6.28f, s));
   }
   gWorld.instanced.push_back(grass);
 
   InstancedSet bushes{ mshCanopy, texLeaf, Color{ 120, 135, 120, 255 }, 0.0f };
-  for (int i = 0; i < 260; i++) {
-    float z = -135 + frand() * 340;
-    float x = -125 + frand() * 250;
+  for (int i = 0; i < 520; i++) {
+    float z = -145 + frand() * 360;
+    float x = -130 + frand() * 260;
     if (reject(x, z)) continue;
-    if (z > 58 && fabsf(x - pathX(z)) < 3.4f) continue;
-    bushes.mats.push_back(MTRS3({ x, -0.1f, z }, { frand2() * 0.15f, frand() * 6.28f, frand2() * 0.15f }, { 0.30f + frand() * 0.25f, 0.16f + frand() * 0.12f, 0.30f + frand() * 0.25f }));
+    bushes.mats.push_back(MTRS3({ x, -0.1f, z }, { frand2() * 0.15f, frand() * 6.28f, frand2() * 0.15f }, { 0.30f + frand() * 0.30f, 0.16f + frand() * 0.14f, 0.30f + frand() * 0.30f }));
   }
   gWorld.instanced.push_back(bushes);
 
+  // ferns: tall thin grass clumps, darker, for dense undergrowth
+  InstancedSet ferns{ mshGrass, texLeaf, Color{ 90, 120, 95, 255 }, 0.0f };
+  ferns.sway = true;
+  for (int i = 0; i < 2600; i++) {
+    float z = -150 + frand() * 372;
+    float x = -135 + frand() * 270;
+    if (distToPath(x, z) < 1.8f) continue;
+    if (fabsf(x) < 7.5f && fabsf(z + 110) < 6.5f) continue;
+    float s = 1.4f + frand() * 1.6f;
+    ferns.mats.push_back(MTRS3({ x, 0, z }, { 0, frand() * 6.28f, 0 }, { s * 0.7f, s, s * 0.7f }));
+  }
+  gWorld.instanced.push_back(ferns);
+
   InstancedSet branches{ mshBranch, texBark, Color{ 150, 140, 130, 255 }, 0.0f };
-  for (int i = 0; i < 130; i++) {
-    float z = -130 + frand() * 330;
-    float x = -120 + frand() * 240;
-    if (z > 58 && fabsf(x - pathX(z)) < 2.5f) continue;
+  for (int i = 0; i < 220; i++) {
+    float z = -140 + frand() * 350;
+    float x = -125 + frand() * 250;
+    if (distToPath(x, z) < 2.0f) continue;
     branches.mats.push_back(MTRS3({ x, 0.04f, z }, { PI / 2 + frand2() * 0.2f, frand() * 6.28f, 0 }, { 1, 1, 1 }));
   }
   gWorld.instanced.push_back(branches);
 
   InstancedSet rocks{ mshRock, texStone, Color{ 170, 170, 165, 255 }, 0.05f };
-  for (int i = 0; i < 80; i++) {
-    float z = -130 + frand() * 330;
-    float x = -120 + frand() * 240;
-    if (z > 58 && fabsf(x - pathX(z)) < 4) continue;
+  for (int i = 0; i < 130; i++) {
+    float z = -140 + frand() * 350;
+    float x = -125 + frand() * 250;
+    if (distToPath(x, z) < 3.0f) continue;
     float s = 0.4f + frand() * 1.3f;
     rocks.mats.push_back(MTRS3({ x, 0.05f, z }, { 0, frand() * 6.28f, 0 }, { s, s * 0.65f, s }));
     if (s > 0.8f) AddCircleCol(x, z, s * 0.5f);
   }
   gWorld.instanced.push_back(rocks);
+
+  // dead trees (bare, leaning) for atmosphere near the well & deep forest
+  InstancedSet dead{ mshTrunk, texBark, Color{ 90, 84, 78, 255 }, 0.02f };
+  for (int i = 0; i < 70; i++) {
+    float z = -145 + frand() * 200;
+    float x = -130 + frand() * 200;
+    if (distToPath(x, z) < 3.5f || reject(x, z)) continue;
+    float s = 0.7f + frand() * 0.7f;
+    dead.mats.push_back(MTRS3({ x, 0, z }, { frand2() * 0.18f, frand() * 6.28f, frand2() * 0.18f }, { s, s * 1.1f, s }));
+    AddCircleCol(x, z, 0.35f * s);
+  }
+  gWorld.instanced.push_back(dead);
 
   InstancedSet posts{ mshPost, texWood, Color{ 165, 150, 135, 255 }, 0.0f };
   for (float z = 195; z >= 90; z -= 3.2f) {
@@ -291,24 +332,35 @@ static void BuildTerrain() {
     }
   AddItem(BuildMesh(v, n, uv, idx), MatrixIdentity(), texGround, Color{ 185, 195, 175, 255 }, 0.0f, false);
 
-  // dirt path strip
-  std::vector<float> pv, pn, puv; std::vector<unsigned short> pidx;
-  std::vector<Vector3> pts;
-  for (float z = 205; z >= 55; z -= 2.5f) pts.push_back({ pathX(z), 0, z });
-  for (float z = 55; z >= -88; z -= 4) pts.push_back({ pathX(55) * (z + 88) / 143.0f, 0, z });
-  for (size_t i = 0; i < pts.size(); i++) {
-    Vector3 p = pts[i];
-    Vector3 dir = (i + 1 < pts.size()) ? Vector3Subtract(pts[i + 1], p) : Vector3Subtract(p, pts[i - 1]);
-    Vector3 side = Vector3Scale(Vector3Normalize({ -dir.z, 0, dir.x }), 1.7f);
-    pv.insert(pv.end(), { p.x - side.x, 0.04f, p.z - side.z, p.x + side.x, 0.04f, p.z + side.z });
-    pn.insert(pn.end(), { 0, 1, 0, 0, 1, 0 });
-    puv.insert(puv.end(), { 0, (float)i * 0.5f, 1, (float)i * 0.5f });
-    if (i > 0) {
-      unsigned short a = (unsigned short)((i - 1) * 2);
-      pidx.insert(pidx.end(), { a, (unsigned short)(a + 1), (unsigned short)(a + 2), (unsigned short)(a + 1), (unsigned short)(a + 3), (unsigned short)(a + 2) });
+  // dirt path strip — wider, continuous, slightly raised to avoid z-fight
+  auto buildStrip = [&](std::vector<Vector3>& pts, float halfW) {
+    std::vector<float> pv, pn, puv; std::vector<unsigned short> pidx;
+    for (size_t i = 0; i < pts.size(); i++) {
+      Vector3 p = pts[i];
+      Vector3 dir = (i + 1 < pts.size()) ? Vector3Subtract(pts[i + 1], p) : Vector3Subtract(p, pts[i - 1]);
+      Vector3 side = Vector3Scale(Vector3Normalize({ -dir.z, 0, dir.x }), halfW);
+      pv.insert(pv.end(), { p.x - side.x, 0.05f, p.z - side.z, p.x + side.x, 0.05f, p.z + side.z });
+      pn.insert(pn.end(), { 0, 1, 0, 0, 1, 0 });
+      puv.insert(puv.end(), { 0, (float)i * 0.5f, 1, (float)i * 0.5f });
+      if (i > 0) {
+        unsigned short a = (unsigned short)((i - 1) * 2);
+        pidx.insert(pidx.end(), { a, (unsigned short)(a + 1), (unsigned short)(a + 2), (unsigned short)(a + 1), (unsigned short)(a + 3), (unsigned short)(a + 2) });
+      }
     }
+    AddItem(BuildMesh(pv, pn, puv, pidx), MatrixIdentity(), texDirt, Color{ 205, 193, 176, 255 }, 0.0f, false);
+  };
+  std::vector<Vector3> pts;
+  for (float z = 206; z >= 55; z -= 1.5f) pts.push_back({ pathLine(z), 0, z });
+  for (float z = 55; z >= -90; z -= 1.5f) pts.push_back({ pathLine(z), 0, z });
+  buildStrip(pts, 2.3f);
+  // branch from the crossroad west to the well clearing
+  std::vector<Vector3> wellPts;
+  for (float t = 0; t <= 1.001f; t += 0.04f) {
+    float bx = gWorld.sign.x + (gWorld.well.x - gWorld.sign.x) * t;
+    float bz = gWorld.sign.z + (gWorld.well.z - gWorld.sign.z) * t + sinf(t * 6.0f) * 2.0f;
+    wellPts.push_back({ bx, 0, bz });
   }
-  AddItem(BuildMesh(pv, pn, puv, pidx), MatrixIdentity(), texDirt, Color{ 200, 190, 175, 255 }, 0.0f, false);
+  buildStrip(wellPts, 1.9f);
 
   // world bounds
   AddBoxCol(-160, -140, -200, 230); AddBoxCol(140, 160, -200, 230);
@@ -348,21 +400,38 @@ static void BuildSigns() {
 
 static void BuildWell() {
   Vector3 W = gWorld.well;
-  // stone ring of 12 blocks
-  for (int i = 0; i < 12; i++) {
-    float a = i / 12.0f * 2 * PI;
-    AddItem(GenMeshCube(0.85f, 0.9f, 0.45f),
-      MTRS3({ W.x + cosf(a) * 1.45f, 0.45f, W.z + sinf(a) * 1.45f }, { 0, -a + PI / 2, 0 }, { 1, 1, 1 }),
-      texStone, Color{ 130, 134, 126, 255 }, 0.05f);
+  // ---- the clearing: a ring of dead, leaning trees enclosing the well
+  for (int i = 0; i < 16; i++) {
+    float a = i / 16.0f * 2 * PI;
+    float rr = 11.0f + frand() * 3.0f;
+    float s = 0.9f + frand() * 0.8f;
+    AddItem(mshTrunk, MTRS3({ W.x + cosf(a) * rr, 0, W.z + sinf(a) * rr }, { sinf(a) * 0.22f, frand() * 6.28f, cosf(a) * 0.22f }, { s, s * 1.2f, s }),
+      texBark, Color{ 80, 74, 68, 255 }, 0.02f);
+    AddCircleCol(W.x + cosf(a) * rr, W.z + sinf(a) * rr, 0.4f);
   }
-  // black void inside — it has no bottom
-  AddItem(GenMeshCylinder(1.3f, 0.05f, 12), MatrixTranslate(W.x, 0.82f, W.z), gGfx.white, Color{ 0, 0, 0, 255 }, 0, false);
-  // wooden frame + crossbar + rope
-  AddItem(GenMeshCube(0.14f, 2.4f, 0.14f), MatrixTranslate(W.x - 1.5f, 1.2f, W.z), texWood, Color{ 130, 116, 100, 255 });
-  AddItem(GenMeshCube(0.14f, 2.4f, 0.14f), MatrixTranslate(W.x + 1.5f, 1.2f, W.z), texWood, Color{ 130, 116, 100, 255 });
-  AddItem(GenMeshCube(3.3f, 0.12f, 0.12f), MatrixTranslate(W.x, 2.35f, W.z), texWood, Color{ 130, 116, 100, 255 });
-  AddItem(GenMeshCylinder(0.025f, 1.55f, 5), MatrixTranslate(W.x, 0.85f, W.z), texWood, Color{ 90, 82, 70, 255 }, 0, false);
-  AddCircleCol(W.x, W.z, 1.95f);
+  // bone-pale ground ring of marker stones around the rim
+  for (int i = 0; i < 20; i++) {
+    float a = i / 20.0f * 2 * PI;
+    AddItem(mshStone, MTRS3({ W.x + cosf(a) * 3.2f, 0.1f, W.z + sinf(a) * 3.2f }, { 0, frand() * 6.28f, 0 }, { 1.4f, 1.0f, 1.4f }),
+      texPale, Color{ 200, 198, 190, 255 }, 0.06f);
+  }
+  // ---- the well itself, larger, grotesque
+  for (int i = 0; i < 14; i++) {
+    float a = i / 14.0f * 2 * PI;
+    AddItem(GenMeshCube(0.95f, 1.2f, 0.5f),
+      MTRS3({ W.x + cosf(a) * 1.6f, 0.6f, W.z + sinf(a) * 1.6f }, { 0, -a + PI / 2, 0 }, { 1, 1, 1 }),
+      texStone, Color{ 120, 124, 116, 255 }, 0.05f);
+  }
+  // black void inside — it has no bottom. fogMin 0 so it stays pure black.
+  AddItem(GenMeshCylinder(1.45f, 0.05f, 14), MatrixTranslate(W.x, 1.02f, W.z), gGfx.white, Color{ 0, 0, 0, 255 }, 0, false);
+  // wooden frame + crossbar + winding handle + rope down into the dark
+  AddItem(GenMeshCube(0.16f, 2.8f, 0.16f), MatrixTranslate(W.x - 1.7f, 1.4f, W.z), texWood, Color{ 120, 106, 92, 255 });
+  AddItem(GenMeshCube(0.16f, 2.8f, 0.16f), MatrixTranslate(W.x + 1.7f, 1.4f, W.z), texWood, Color{ 120, 106, 92, 255 });
+  AddItem(GenMeshCube(3.8f, 0.14f, 0.14f), MatrixTranslate(W.x, 2.75f, W.z), texWood, Color{ 120, 106, 92, 255 });
+  AddItem(GenMeshCylinder(0.12f, 3.4f, 7), MTRS3({ W.x, 2.6f, W.z }, { 0, 0, PI / 2 }, { 1, 1, 1 }), texWood, Color{ 90, 80, 68, 255 }); // winch barrel
+  AddItem(GenMeshCylinder(0.02f, 2.2f, 5), MatrixTranslate(W.x, 0.4f, W.z), texWood, Color{ 70, 64, 54, 255 }, 0, false); // rope
+  AddCircleCol(W.x, W.z, 2.05f);
+  // store the well clearing as a ground zone hint (flat) — already flat terrain
 }
 
 static void BuildCabin() {
