@@ -15,8 +15,8 @@
 // ---------------------------------------------------------------- constants
 #define INTERNAL_W 640
 #define INTERNAL_H 360
-#define PHONE_SCR_W 192
-#define PHONE_SCR_H 384
+#define PHONE_SCR_W 384
+#define PHONE_SCR_H 768
 
 static inline float frand() { return (float)GetRandomValue(0, 10000) / 10000.0f; }
 static inline float frand2() { return frand() * 2.0f - 1.0f; }
@@ -142,6 +142,7 @@ struct Phone {
   std::string message = ""; float messageT = 0;
   float flickerT = 0; bool flickerOff = false;
   float uiClock = 0;
+  bool charging = false; float chargeT = 0; // 5s charge animation
 };
 extern Phone gPhone;
 void PhoneUpdate(float dt, float time, bool indoor, bool entitiesNear, float stress);
@@ -192,6 +193,8 @@ struct Director {
   bool fHiddenOpen = false, fTruth = false, fNoteRead = false, fNotePending = false;
   bool fWellBattery = false, fBaseBattery = false, fSamaraDone = false;
   float mirrorHold = 0;
+  std::string readingNote;     // non-empty = a lore note panel is open
+  bool loreRead[6] = { false };
   std::string sub; float subT = 0;
   std::string big; float bigT = 0;
   float flashWhite = 0, flashBlack = 0, glitch = 0;
@@ -244,3 +247,4 @@ void SetMirrorFigure(float opacity);
 void WorldTick(float dt, float time);
 void SpawnWatcher(Vector3 at);
 void SfxBreathPlayer(float intensity);
+void SfxChargeTick();

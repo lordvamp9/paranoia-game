@@ -162,8 +162,8 @@ static void DrawCredits(float t) {
     : "The screen died. The dark is full of breathing.\nThey no longer need the camera to watch you.";
   Vector2 m = MeasureTextEx(gGfx.font, blurb, 11, 2);
   DrawTextEx(gGfx.font, blurb, { (INTERNAL_W - m.x) / 2, 158 }, 11, 2, Color{ 119, 119, 119, 255 });
-  TextC("a game by vamp9", 228, 13, 3, Color{ 170, 170, 170, 255 });
-  TextC("design - code - sound: procedural", 250, 9, 2, Color{ 68, 68, 68, 255 });
+  TextC("PARANOIA", 224, 16, 5, Color{ 175, 175, 178, 255 });
+  TextC("a game by vamp9", 250, 11, 3, Color{ 130, 130, 134, 255 });
   TextC("[ENTER] menu      [ESC] quit", 300, 11, 2, Color{ 85, 85, 85, 255 });
 }
 

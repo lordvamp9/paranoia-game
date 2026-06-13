@@ -88,7 +88,7 @@ void DirectorCatch(Entity& e) {
     if (en.kind == EKind::Samara) { if (en.state != EState::Dormant) { en.state = EState::Retreating; en.stateT = 0; } continue; }
     en.pos = en.home; en.state = EState::Retreating; en.stateT = 0; // walk away, don't re-camp
   }
-  Big(e.kind == EKind::Samara ? "SEVEN DAYS" : "IT TOUCHED YOU", 2.4f);
+  Big(e.kind == EKind::Samara ? "SHE FOUND YOU" : "IT TOUCHED YOU", 2.4f);
 }
 
 // ---------------------------------------------------------------- phases
@@ -162,6 +162,19 @@ static void Phase3Script() {
 }
 
 // ---------------------------------------------------------------- interact
+// SH2-style lore: each note is a piece of who you are and why you're here
+struct LoreNote { Vector3 pos; const char* text; };
+static const LoreNote gLore[4] = {
+  { { pathX(150) + 1.2f, 0.1f, 150 },
+    "My head is bleeding. The car is back\nthere, wrapped around a tree.\n\nI was driving to find her. I think.\nWhy can't I remember her face?" },
+  { { gWorld.fountain.x - 2.4f, 0.9f, gWorld.fountain.z - 1.4f },
+    "I keep finding notes in my own hand.\nI don't remember writing them.\n\n'Follow the path. Reach the house.\nDon't trust the light.'  -- me?" },
+  { { gWorld.cabin.x - 1.6f, 0.86f, gWorld.cabin.z + 0.9f },
+    "If you're reading this, you've been\nhere before. We always come back.\n\nThe white house keeps what it takes.\nShe is still inside. So are you." },
+  { { -3.4f, 0.5f, -107.8f },
+    "Her name was on the tip of my tongue\nwhen the wheel slipped.\n\nThe crash took more than my memory.\nI came here to give the rest back." },
+};
+
 struct Interactable { Vector3 pos; float r; std::string prompt; bool needLight; int id; };
 static std::vector<Interactable> CurrentInteractables() {
   std::vector<Interactable> L;
@@ -170,8 +183,8 @@ static std::vector<Interactable> CurrentInteractables() {
     L.push_back({ gWorld.waterKeyP, 1.6f, gPhone.lightOn ? "[E] TAKE THE IRON KEY" : "", true, 1 });
   if (D.phase >= 2 && !D.fCabinOpen)
     L.push_back({ { gWorld.cabin.x - 2.6f, 1.2f, gWorld.cabin.z + 0.85f }, 1.7f, "[E] KEYPAD", false, 2 });
-  if (D.fCabinOpen && !D.fFakeCharge)
-    L.push_back({ { gWorld.cabin.x + 1.2f, 0.9f, gWorld.cabin.z - 0.8f }, 1.4f, "[E] CHARGE PHONE", false, 3 });
+  if (D.fCabinOpen && gPhone.battery < 99 && !gPhone.charging)
+    L.push_back({ { gWorld.cabin.x + 1.2f, 0.9f, gWorld.cabin.z - 0.8f }, 1.6f, "[E] CHARGE PHONE", false, 3 });
   if (!D.fWellBattery && D.phase >= 2)
     L.push_back({ { gWorld.wellBattery.x, 0.1f, gWorld.wellBattery.z }, 1.3f, "[E] TAKE BATTERY", false, 4 });
   if (D.fInHouse && !D.fKitchenKey)
@@ -190,10 +203,14 @@ static std::vector<Interactable> CurrentInteractables() {
     L.push_back({ gWorld.oldPhoneP, 1.5f, "[E] EXAMINE THE OTHER PHONE", false, 10 });
   if (D.fTruth && !D.fNoteRead)
     L.push_back({ gWorld.noteP, 1.5f, "[E] READ THE NOTE", false, 11 });
+  // lore notes last — never override a real interaction
+  for (int i = 0; i < 4; i++)
+    if (!D.loreRead[i]) L.push_back({ gLore[i].pos, 1.5f, "[E] READ", false, 30 + i });
   return L;
 }
 
 std::string DirectorPrompt() {
+  if (!gDir.readingNote.empty()) return "[E] CLOSE";
   if (gDir.fNotePending) return "[E] CLOSE";
   if (gDir.fNoteRead && !gDir.ended) return "[E] TRUST THE PHONE      [Q] REFUSE";
   Vector3 p = gPlayer.pos;
@@ -210,6 +227,7 @@ static void Ending(int which);
 void DirectorInteract() {
   Director& D = gDir;
   if (D.ended) return;
+  if (!D.readingNote.empty()) { D.readingNote.clear(); return; }
   if (D.fNotePending) { D.fNotePending = false; D.fNoteRead = true; gPhone.objective = "DECIDE"; return; }
   if (D.fNoteRead) { Ending(1); return; }
   Vector3 p = gPlayer.pos;
@@ -218,6 +236,13 @@ void DirectorInteract() {
     float dy = fabsf(it.pos.y - (p.y + 1.0f));
     if (d >= it.r || dy >= 2.4f) continue;
     if (it.needLight && !gPhone.lightOn) continue;
+    if (it.id >= 30 && it.id < 34) {
+      int n = it.id - 30;
+      D.loreRead[n] = true;
+      D.readingNote = gLore[n].text;
+      SfxPickup();
+      return;
+    }
     switch (it.id) {
       case 1:
         D.fWaterKey = true;
@@ -230,10 +255,11 @@ void DirectorInteract() {
         return;
       case 2: D.codeBuffer = ""; return;
       case 3:
-        D.fFakeCharge = true;
+        gPhone.charging = true; gPhone.chargeT = 0;
         SfxBeep(false);
-        gPhone.message = "CHARGING..."; gPhone.messageT = 3;
-        return; // the lie resolves in Update()
+        gPhone.message = "CHARGING"; gPhone.messageT = 2;
+        Sub("Hold still while it charges.", 4);
+        return;
       case 4: D.fWellBattery = true; gWorld.items[gWorld.wellBatteryItem].tint.a = 0; InvGive(IT_BATTERY); return;
       case 5:
         if (!D.fDrawerOpen) { D.fDrawerOpen = true; OpenDrawer(); SfxBranch(0.2f); }
@@ -346,13 +372,6 @@ void DirectorUpdate(float dt, float time) {
     e0.walkPhase += dt * 9;
     e0.speed = 4;
     if (k >= 1) { gE0moveT = -1; if (fired[4] || !fired[3]) e0.visible = false; }
-  }
-
-  // fake charger punchline
-  if (D.fFakeCharge && !fired[7] && gPhone.messageT <= 0.1f) {
-    fired[7] = true;
-    gPhone.message = "NO POWER DETECTED"; gPhone.messageT = 4;
-    SfxBeep(true); D.glitch += 0.5f;
   }
 
   // watchers: distant pale figures, phase 2+

@@ -355,90 +355,159 @@ static void DrawHair(Vector3 head, float w, float len, float alpha) {
   }
 }
 
+// ---- smooth humanoid primitives (spheres + tapered bones) ----
+static Mesh eSphere, eCyl;
+
+static void ESph(Vector3 c, float r, Texture2D tex, Color tint, float spec) {
+  Matrix m = MatrixMultiply(MatrixScale(r, r, r), MatrixTranslate(c.x, c.y, c.z));
+  SetSpec(0, spec);
+  gMatEnt.maps[MATERIAL_MAP_ALBEDO].texture = tex;
+  gMatEnt.maps[MATERIAL_MAP_ALBEDO].color = tint;
+  DrawMesh(eSphere, gMatEnt, m);
+}
+static void ESphE(Vector3 c, Vector3 rad, Texture2D tex, Color tint, float spec) { // ellipsoid
+  Matrix m = MatrixMultiply(MatrixScale(rad.x, rad.y, rad.z), MatrixTranslate(c.x, c.y, c.z));
+  SetSpec(0, spec);
+  gMatEnt.maps[MATERIAL_MAP_ALBEDO].texture = tex;
+  gMatEnt.maps[MATERIAL_MAP_ALBEDO].color = tint;
+  DrawMesh(eSphere, gMatEnt, m);
+}
+// tapered limb between a and b with end radii ra, rb (+ smooth joint balls)
+static void EBone(Vector3 a, Vector3 b, float ra, float rb, Texture2D tex, Color tint, float spec) {
+  Vector3 d = Vector3Subtract(b, a);
+  float L = Vector3Length(d);
+  if (L < 1e-4f) return;
+  Quaternion q = QuaternionFromVector3ToVector3({ 0, 1, 0 }, Vector3Scale(d, 1.0f / L));
+  // cylinder is uniform; approximate taper by average radius + joint balls of ra/rb
+  float r = (ra + rb) * 0.5f;
+  Matrix m = MatrixMultiply(MatrixMultiply(MatrixScale(r, L, r), QuaternionToMatrix(q)), MatrixTranslate(a.x, a.y, a.z));
+  SetSpec(0, spec);
+  gMatEnt.maps[MATERIAL_MAP_ALBEDO].texture = tex;
+  gMatEnt.maps[MATERIAL_MAP_ALBEDO].color = tint;
+  DrawMesh(eCyl, gMatEnt, m);
+  ESph(a, ra, tex, tint, spec);
+  ESph(b, rb, tex, tint, spec);
+}
+static Vector3 L2W(Matrix W, float x, float y, float z) { return Vector3Transform(Vector3{ x, y, z }, W); }
+
+// sculpted gaunt head: skull + brow + cheeks + jaw + recessed black eyes + maw
+static void EHead(Matrix W, Vector3 lc, float r, Texture2D skinTex, Color skin, bool maw, float twitch) {
+  float ty = twitch * frand2() * 0.06f;
+  Vector3 c = L2W(W, lc.x, lc.y + ty, lc.z);
+  ESphE(c, { r * 0.92f, r * 1.12f, r * 0.98f }, skinTex, skin, 0.04f);        // cranium (tall)
+  ESphE(L2W(W, lc.x, lc.y - r * 0.55f, lc.z + r * 0.28f), { r * 0.7f, r * 0.55f, r * 0.55f }, skinTex, skin, 0.04f); // jaw
+  ESphE(L2W(W, lc.x, lc.y + r * 0.28f, lc.z + r * 0.74f), { r * 0.78f, r * 0.30f, r * 0.30f }, skinTex, skin, 0.03f); // brow ridge
+  // recessed black eye sockets
+  Color blk = { 2, 2, 4, 255 };
+  ESphE(L2W(W, lc.x - r * 0.42f, lc.y + r * 0.08f, lc.z + r * 0.80f), { r * 0.30f, r * 0.34f, r * 0.22f }, gGfx.white, blk, 0);
+  ESphE(L2W(W, lc.x + r * 0.42f, lc.y + r * 0.08f, lc.z + r * 0.80f), { r * 0.30f, r * 0.34f, r * 0.22f }, gGfx.white, blk, 0);
+  // nose ridge
+  ESphE(L2W(W, lc.x, lc.y - r * 0.10f, lc.z + r * 0.95f), { r * 0.16f, r * 0.32f, r * 0.20f }, skinTex, skin, 0.04f);
+  // gaping mouth
+  if (maw) ESphE(L2W(W, lc.x, lc.y - r * 0.62f, lc.z + r * 0.72f), { r * 0.34f, r * 0.42f, r * 0.20f }, gGfx.white, blk, 0);
+  else ESphE(L2W(W, lc.x, lc.y - r * 0.58f, lc.z + r * 0.80f), { r * 0.30f, r * 0.12f, r * 0.12f }, gGfx.white, blk, 0);
+}
+
+// full standing humanoid; sw = limb swing, lean forward optional
+static void EHumanoid(Matrix W, Entity& e, float time, Texture2D tex, Color skin, bool longArms) {
+  float sp = Clamp(e.speed / 4.0f, 0.0f, 1.0f);
+  float sw = sinf(e.walkPhase) * 0.34f * sp;
+  float bob = fabsf(cosf(e.walkPhase)) * 0.04f * sp;
+  float yo = bob;
+  float aL = longArms ? 0.40f : 0.32f; // arm segment length
+  // torso
+  Vector3 hip = L2W(W, 0, 0.92f + yo, 0), chest = L2W(W, 0, 1.42f + yo, 0), neck = L2W(W, 0, 1.60f + yo, 0);
+  EBone(hip, chest, 0.15f, 0.13f, tex, skin, 0.05f);          // torso
+  EBone(chest, neck, 0.07f, 0.055f, tex, skin, 0.05f);        // neck
+  ESphE(L2W(W, 0, 1.06f + yo, 0), { 0.16f, 0.18f, 0.13f }, tex, skin, 0.05f); // pelvis mass
+  // head
+  EHead(W, { 0, 1.78f + yo, 0 }, 0.135f, tex, skin, true, e.twitchT > 0 ? 1.0f : 0.0f);
+  // arms (long, hanging, swinging)
+  Vector3 shL = L2W(W, -0.18f, 1.50f + yo, 0), shR = L2W(W, 0.18f, 1.50f + yo, 0);
+  Vector3 elL = L2W(W, -0.24f, 1.50f - aL + yo, sw * 0.5f), elR = L2W(W, 0.24f, 1.50f - aL + yo, -sw * 0.5f);
+  Vector3 haL = L2W(W, -0.26f, 1.50f - aL * 2 + yo, sw), haR = L2W(W, 0.26f, 1.50f - aL * 2 + yo, -sw);
+  EBone(shL, elL, 0.055f, 0.045f, tex, skin, 0.05f); EBone(elL, haL, 0.045f, 0.05f, tex, skin, 0.05f);
+  EBone(shR, elR, 0.055f, 0.045f, tex, skin, 0.05f); EBone(elR, haR, 0.045f, 0.05f, tex, skin, 0.05f);
+  // legs
+  Vector3 hpL = L2W(W, -0.10f, 0.90f, 0), hpR = L2W(W, 0.10f, 0.90f, 0);
+  Vector3 knL = L2W(W, -0.11f, 0.46f, sw * 0.6f), knR = L2W(W, 0.11f, 0.46f, -sw * 0.6f);
+  Vector3 ftL = L2W(W, -0.11f, 0.04f, -sw * 0.3f), ftR = L2W(W, 0.11f, 0.04f, sw * 0.3f);
+  EBone(hpL, knL, 0.08f, 0.06f, tex, skin, 0.05f); EBone(knL, ftL, 0.06f, 0.05f, tex, skin, 0.05f);
+  EBone(hpR, knR, 0.08f, 0.06f, tex, skin, 0.05f); EBone(knR, ftR, 0.06f, 0.05f, tex, skin, 0.05f);
+}
+
+// humanoid on all fours (crawler / samara crawl)
+static void ECrawler(Matrix W, Entity& e, float time, Texture2D tex, Color skin, bool grin) {
+  float ph = e.walkPhase;
+  float lg = sinf(ph) * 0.5f, lg2 = sinf(ph + PI) * 0.5f;
+  // spine roughly horizontal, hips low, head up toward player
+  Vector3 hip = L2W(W, 0, 0.55f, -0.55f), chest = L2W(W, 0, 0.62f, 0.10f), neck = L2W(W, 0, 0.66f, 0.45f);
+  EBone(hip, chest, 0.16f, 0.13f, tex, skin, 0.06f);
+  EBone(chest, neck, 0.08f, 0.06f, tex, skin, 0.06f);
+  ESphE(L2W(W, 0, 0.55f, -0.5f), { 0.17f, 0.16f, 0.18f }, tex, skin, 0.06f);
+  EHead(W, { 0, 0.70f, 0.62f }, 0.135f, tex, skin, true, e.twitchT > 0 ? 1.0f : 0.0f);
+  // arms reaching forward to the ground
+  Vector3 shL = L2W(W, -0.20f, 0.62f, 0.15f), shR = L2W(W, 0.20f, 0.62f, 0.15f);
+  Vector3 haL = L2W(W, -0.24f, 0.02f, 0.45f + lg * 0.3f), haR = L2W(W, 0.24f, 0.02f, 0.45f + lg2 * 0.3f);
+  Vector3 elL = Vector3Lerp(shL, haL, 0.5f); elL.y += 0.12f;
+  Vector3 elR = Vector3Lerp(shR, haR, 0.5f); elR.y += 0.12f;
+  EBone(shL, elL, 0.05f, 0.04f, tex, skin, 0.05f); EBone(elL, haL, 0.04f, 0.045f, tex, skin, 0.05f);
+  EBone(shR, elR, 0.05f, 0.04f, tex, skin, 0.05f); EBone(elR, haR, 0.04f, 0.045f, tex, skin, 0.05f);
+  // legs trailing
+  Vector3 hpL = L2W(W, -0.12f, 0.5f, -0.6f), hpR = L2W(W, 0.12f, 0.5f, -0.6f);
+  Vector3 ftL = L2W(W, -0.14f, 0.04f, -1.05f + lg2 * 0.3f), ftR = L2W(W, 0.14f, 0.04f, -1.05f + lg * 0.3f);
+  Vector3 knL = Vector3Lerp(hpL, ftL, 0.5f); knL.y += 0.14f;
+  Vector3 knR = Vector3Lerp(hpR, ftR, 0.5f); knR.y += 0.14f;
+  EBone(hpL, knL, 0.07f, 0.055f, tex, skin, 0.05f); EBone(knL, ftL, 0.055f, 0.05f, tex, skin, 0.05f);
+  EBone(hpR, knR, 0.07f, 0.055f, tex, skin, 0.05f); EBone(knR, ftR, 0.055f, 0.05f, tex, skin, 0.05f);
+}
+
 void EntityDraw(Entity& e, float time) {
-  if (!gEntInit) { mshPart = GenMeshCube(1, 1, 1); gMatEnt = LoadMaterialDefault(); BuildEntityTextures(); gEntInit = true; }
+  if (!gEntInit) {
+    mshPart = GenMeshCube(1, 1, 1); gMatEnt = LoadMaterialDefault(); BuildEntityTextures();
+    eSphere = GenMeshSphere(1.0f, 10, 12); eCyl = GenMeshCylinder(1.0f, 1.0f, 9);
+    gEntInit = true;
+  }
   gMatEnt.shader = gGfx.world;
 
   float tw = (e.twitchT > 0) ? 1.0f : 0.0f;
-  float jx = tw * frand2() * 0.06f, jz = tw * frand2() * 0.06f;
+  float jx = tw * frand2() * 0.05f, jz = tw * frand2() * 0.05f;
   Matrix W = MatrixMultiply(MatrixRotateY(e.facing), MatrixTranslate(e.pos.x + jx, e.pos.y, e.pos.z + jz));
-  bool agit = (e.state == EState::Pursuing || e.state == EState::Hunting);
 
   if (e.kind == EKind::Shadow) {
-    // spectral: near-black translucent body, ragged, with a pale face floating in it
-    Color body = { 6, 6, 10, 225 };
-    float swing = sinf(e.walkPhase) * Clamp(e.speed / 4.0f, 0.0f, 1.0f);
-    float bob = fabsf(cosf(e.walkPhase)) * 0.06f * Clamp(e.speed / 2.0f, 0.0f, 1.0f);
-    float headTilt = tw * frand2() * 0.5f + sinf(time * 0.3f) * 0.08f;
-    float waver = sinf(time * 2.0f + e.pos.x) * 0.03f;
+    // a gaunt ash-grey humanoid, translucent, long-armed; pale gaunt face
+    Color skin = { 78, 80, 92, 232 };
     BeginBlendMode(BLEND_ALPHA);
-    DrawPart({ 0.13f, 1.0f, 0.13f }, { -0.12f, 0.5f + bob, 0 }, { swing * 0.55f, 0, 0 }, W, gGfx.white, body, 0);
-    DrawPart({ 0.13f, 1.0f, 0.13f }, { 0.12f, 0.5f + bob, 0 }, { -swing * 0.55f, 0, 0 }, W, gGfx.white, body, 0);
-    DrawPart({ 0.46f, 0.9f, 0.24f }, { 0, 1.4f + bob, 0 }, { 0.04f, 0, 0.03f + waver }, W, gGfx.white, body, 0);
-    DrawPart({ 0.09f, 1.15f, 0.09f }, { -0.33f, 1.22f + bob, 0 }, { -swing * 0.6f, 0, 0.12f }, W, gGfx.white, body, 0); // long arms
-    DrawPart({ 0.09f, 1.2f, 0.09f }, { 0.33f, 1.18f + bob, 0 }, { swing * 0.6f, 0, -0.12f }, W, gGfx.white, body, 0);
-    DrawPart({ 0.20f, 0.26f, 0.21f }, { 0, 1.97f + bob, 0 }, { 0, headTilt, 0.07f }, W, gGfx.white, body, 0);
+    EHumanoid(W, e, time, texSkin, skin, true);
     EndBlendMode();
-    // the face — only really visible when your light finds it
-    Vector3 head = Vector3Transform(Vector3{ 0, 1.99f + bob, 0.10f }, W);
-    DrawFace(texGhostFace, head, 0.30f, agit ? 0.92f : 0.7f);
-    DrawHair(head, 0.34f, 0.5f, 0.85f);
-    DrawCylinderEx({ e.pos.x, 0.015f, e.pos.z }, { e.pos.x, 0.02f, e.pos.z }, 0.65f, 0.65f, 10, Fade(BLACK, 0.5f));
+    DrawHair(L2W(W, 0, 1.92f, 0.04f), 0.36f, 0.5f, 0.7f);
+    DrawCylinderEx({ e.pos.x, 0.015f, e.pos.z }, { e.pos.x, 0.02f, e.pos.z }, 0.6f, 0.6f, 12, Fade(BLACK, 0.45f));
   } else if (e.kind == EKind::Crawler) {
-    // pale, on all fours, grinning — the under-bed thing. lunging gait.
-    Color flesh = { 198, 196, 188, 240 };
-    float lunge = sinf(e.walkPhase * 1.4f);
-    Matrix C = MatrixMultiply(MatrixRotateX(1.35f), W);
+    Color flesh = { 196, 192, 182, 244 };
     BeginBlendMode(BLEND_ALPHA);
-    DrawPart({ 0.44f, 1.0f, 0.34f }, { 0, 0.55f, -0.1f }, { 0, 0, lunge * 0.1f }, C, texSkin, flesh, 0.08f);
-    DrawPart({ 0.09f, 0.8f, 0.09f }, { -0.26f, 0.4f, 0.34f }, { lunge * 1.0f - 0.7f, 0, 0.2f }, W, texSkin, flesh, 0.06f);
-    DrawPart({ 0.09f, 0.8f, 0.09f }, { 0.26f, 0.4f, 0.34f }, { -lunge * 1.0f - 0.7f, 0, -0.2f }, W, texSkin, flesh, 0.06f);
-    DrawPart({ 0.10f, 0.78f, 0.10f }, { -0.17f, 0.38f, -0.7f }, { -lunge * 0.8f + 0.5f, 0, 0 }, W, texSkin, flesh, 0.05f);
-    DrawPart({ 0.10f, 0.78f, 0.10f }, { 0.17f, 0.38f, -0.7f }, { lunge * 0.8f + 0.5f, 0, 0 }, W, texSkin, flesh, 0.05f);
-    DrawPart({ 0.20f, 0.22f, 0.20f }, { 0, 0.62f, 0.5f }, { -1.0f, tw * frand2() * 0.7f, 0 }, W, texSkin, flesh, 0.07f);
+    ECrawler(W, e, time, texSkin, flesh, true);
     EndBlendMode();
-    Vector3 head = Vector3Transform(Vector3{ 0, 0.62f, 0.62f }, W);
-    DrawFace(texGhostFaceGrin, head, 0.32f, 0.95f);
-    DrawHair(head, 0.40f, 0.34f, 0.9f);
+    DrawHair(L2W(W, 0, 0.80f, 0.55f), 0.42f, 0.34f, 0.9f);
   } else if (e.kind == EKind::Samara) {
-    Color gown = { 222, 226, 228, 245 };
-    Color skin = { 190, 196, 188, 245 };
+    Color gown = { 214, 218, 220, 246 };
     bool crawl = (e.state == EState::Pursuing || e.state == EState::Retreating);
-    float lurch = sinf(e.walkPhase) * 0.6f;
     BeginBlendMode(BLEND_ALPHA);
     if (crawl) {
-      Matrix C = MatrixMultiply(MatrixRotateX(1.25f), W);
-      DrawPart({ 0.42f, 1.15f, 0.30f }, { 0, 0.75f, -0.15f }, { 0, 0, lurch * 0.10f }, C, texPale, gown, 0.07f);
-      DrawPart({ 0.085f, 0.85f, 0.085f }, { -0.26f, 0.45f, 0.32f }, { lurch * 0.9f - 0.7f, 0, 0.2f }, W, texPale, skin, 0.05f);
-      DrawPart({ 0.085f, 0.85f, 0.085f }, { 0.26f, 0.45f, 0.32f }, { -lurch * 0.9f - 0.7f, 0, -0.2f }, W, texPale, skin, 0.05f);
-      DrawPart({ 0.10f, 0.8f, 0.10f }, { -0.16f, 0.4f, -0.78f }, { lurch * 0.7f + 0.5f, 0, 0 }, W, texPale, gown, 0.04f);
-      DrawPart({ 0.10f, 0.8f, 0.10f }, { 0.16f, 0.4f, -0.78f }, { -lurch * 0.7f + 0.5f, 0, 0 }, W, texPale, gown, 0.04f);
-      DrawPart({ 0.20f, 0.25f, 0.21f }, { 0, 0.78f, 0.55f }, { -0.9f, tw * frand2() * 0.8f, lurch * 0.2f }, W, texPale, skin, 0.06f);
+      ECrawler(W, e, time, texPale, gown, false);
       EndBlendMode();
-      Vector3 head = Vector3Transform(Vector3{ 0, 0.80f, 0.66f }, W);
-      DrawFace(texGhostFace, head, 0.26f, 0.85f);
-      DrawHair(head, 0.46f, 0.55f, 0.95f); // long wet hair dragging forward
+      DrawHair(L2W(W, 0, 0.78f, 0.62f), 0.5f, 0.72f, 0.97f); // long wet hair forward over the face
     } else {
       float k = (e.state == EState::Emerging) ? Clamp(e.stateT / 3.6f, 0.0f, 1.0f) : 1.0f;
-      DrawPart({ 0.46f, 1.45f, 0.32f }, { 0, 0.85f, 0 }, { 0.06f, 0, sinf(time * 7) * 0.02f * k }, W, texPale, gown, 0.07f);
-      DrawPart({ 0.08f, 0.95f, 0.08f }, { -0.28f, 1.05f, 0 }, { 0, 0, 0.16f }, W, texPale, skin, 0.05f);
-      DrawPart({ 0.08f, 0.95f, 0.08f }, { 0.28f, 1.02f, 0 }, { 0, 0, -0.20f }, W, texPale, skin, 0.05f);
-      DrawPart({ 0.21f, 0.26f, 0.22f }, { 0, 1.78f, 0 }, { 0.22f, 0, tw * frand2() * 0.6f }, W, texPale, skin, 0.06f);
+      EHumanoid(W, e, time, texPale, gown, false);
       EndBlendMode();
-      Vector3 head = Vector3Transform(Vector3{ 0, 1.80f, 0.04f }, W);
-      DrawHair(head, 0.5f, 0.95f, 0.97f);   // hair curtain hides the face — dread
-      DrawFace(texGhostFace, head, 0.24f, 0.35f * k); // barely seen behind hair
+      DrawHair(L2W(W, 0, 1.80f, 0.05f), 0.52f, 0.95f, 0.97f * k); // curtain hides the face
     }
-  } else { // Watcher: pale gowned woman, hair over the face, motionless
-    Color pale = { 196, 198, 192, 235 };
+  } else { // Watcher: pale woman, motionless, hair over the face
+    Color pale = { 188, 190, 186, 236 };
+    e.speed = 0;
     BeginBlendMode(BLEND_ALPHA);
-    DrawPart({ 0.34f, 1.55f, 0.22f }, { 0, 0.82f, 0 }, { 0, 0, 0.02f }, W, texPale, pale, 0.03f);
-    DrawPart({ 0.16f, 0.24f, 0.18f }, { 0, 1.74f, 0 }, { 0.05f, 0, 0.06f }, W, texPale, pale, 0.03f);
-    DrawPart({ 0.06f, 1.1f, 0.06f }, { -0.22f, 0.92f, 0 }, { 0, 0, 0.06f }, W, texPale, pale, 0.03f);
-    DrawPart({ 0.06f, 1.1f, 0.06f }, { 0.22f, 0.92f, 0 }, { 0, 0, -0.06f }, W, texPale, pale, 0.03f);
+    EHumanoid(W, e, time, texPale, pale, false);
     EndBlendMode();
-    Vector3 head = Vector3Transform(Vector3{ 0, 1.76f, 0.06f }, W);
-    DrawHair(head, 0.5f, 0.8f, 0.95f);
-    DrawFace(texGhostFace, head, 0.22f, 0.4f);
+    DrawHair(L2W(W, 0, 1.80f, 0.05f), 0.52f, 0.85f, 0.96f);
   }
 }

@@ -64,9 +64,18 @@ uniform int shadowOn;
 uniform float specK;
 uniform float emisK;
 uniform float fogMin;
+uniform int occlude;            // 1 = actor pass: test against world depth
+uniform sampler2D texWorldDepth;
+uniform vec2 uResActor;
 out vec4 finalColor;
 
 void main() {
+    // actor pass: hide fragments the low-res world occludes (walls in front)
+    if (occlude == 1) {
+        vec2 suv = gl_FragCoord.xy / uResActor;
+        float wd = texture(texWorldDepth, suv).r;
+        if (wd < gl_FragCoord.z - 0.0012) discard;
+    }
     vec4 base = texture(texture0, fragUV) * colDiffuse * fragColor;
     // procedural micro-detail: perturb the normal with world-space noise
     vec3 N = normalize(fragNormal);

@@ -64,8 +64,24 @@ static void CacheWorldULocs(int i, Shader sh) {
   ULoc[i].texShadow = GetShaderLocation(sh, "texShadow");
 }
 
+// scene RT with BOTH color and depth as sampleable textures
+static RenderTexture2D LoadSceneRT(int w, int h) {
+  RenderTexture2D t = { 0 };
+  t.id = rlLoadFramebuffer();
+  rlEnableFramebuffer(t.id);
+  t.texture.id = rlLoadTexture(NULL, w, h, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8, 1);
+  t.texture.width = w; t.texture.height = h; t.texture.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8; t.texture.mipmaps = 1;
+  t.depth.id = rlLoadTextureDepth(w, h, false); // sampleable depth texture
+  t.depth.width = w; t.depth.height = h; t.depth.format = 19; t.depth.mipmaps = 1;
+  rlFramebufferAttach(t.id, t.texture.id, RL_ATTACHMENT_COLOR_CHANNEL0, RL_ATTACHMENT_TEXTURE2D, 0);
+  rlFramebufferAttach(t.id, t.depth.id, RL_ATTACHMENT_DEPTH, RL_ATTACHMENT_TEXTURE2D, 0);
+  rlFramebufferComplete(t.id);
+  rlDisableFramebuffer();
+  return t;
+}
+
 void GfxInit() {
-  gGfx.scene = LoadRenderTexture(INTERNAL_W, INTERNAL_H);
+  gGfx.scene = LoadSceneRT(INTERNAL_W, INTERNAL_H);
   SetTextureFilter(gGfx.scene.texture, TEXTURE_FILTER_POINT);
   gGfx.phoneScr = LoadRenderTexture(PHONE_SCR_W, PHONE_SCR_H);
   SetTextureFilter(gGfx.phoneScr.texture, TEXTURE_FILTER_POINT);
@@ -166,27 +182,25 @@ void GfxRenderFrame(float time, float dt) {
     gGfx.lightVP = MatrixMultiply(lv, lp);
   }
 
-  // ---- main scene pass (internal res)
+  // ---- WORLD pass: low-res (this layer gets the pixelated dither look)
   BeginTextureMode(gGfx.scene);
   rlSetClipPlanes(0.05, 320.0);
   ClearBackground(Color{ 1, 1, 3, 255 });
   BeginMode3D(gPlayer.cam);
   SetWorldUniforms(time, lightI, eye, fwd);
+  int occ0 = 0;
+  SetShaderValue(gGfx.world, GetShaderLocation(gGfx.world, "occlude"), &occ0, SHADER_UNIFORM_INT);
+  SetShaderValue(gGfx.worldInst, GetShaderLocation(gGfx.worldInst, "occlude"), &occ0, SHADER_UNIFORM_INT);
   WorldDraw(false, time);
-  for (auto& e : gEntities) if (!e.removed && e.visible) EntityDraw(e, time);
-  // hand + phone always on top: clear depth so they never clip the world
-  if (gState == GS_PLAY || gState == GS_PAUSE) {
-    rlDrawRenderBatchActive();
-    glClearDepthHack();
-    HandDraw(time, gDir.stress);
-  }
   EndMode3D();
-  HudDraw(time, gDir.stress);
   EndTextureMode();
 
-  // ---- post pass to window
+  int sw = GetScreenWidth(), sh = GetScreenHeight();
+
   BeginDrawing();
   ClearBackground(BLACK);
+
+  // ---- POST: draw the dithered world full-screen
   float res[2] = { (float)INTERNAL_W, (float)INTERNAL_H };
   float st = gDir.stress / 100.0f;
   float gl = gDir.glitch + (gDir.stress > 80 ? (gDir.stress - 80) / 100.0f : 0);
@@ -199,9 +213,47 @@ void GfxRenderFrame(float time, float dt) {
   SetShaderValue(gGfx.post, UPost.uFlashB, &gDir.flashBlack, SHADER_UNIFORM_FLOAT);
   SetShaderValue(gGfx.post, UPost.uBattery, &bat, SHADER_UNIFORM_FLOAT);
   BeginShaderMode(gGfx.post);
-  Rectangle src = { 0, 0, (float)gGfx.scene.texture.width, -(float)gGfx.scene.texture.height };
-  Rectangle dst = { 0, 0, (float)GetScreenWidth(), (float)GetScreenHeight() };
-  DrawTexturePro(gGfx.scene.texture, src, dst, Vector2{ 0, 0 }, 0, WHITE);
+  Rectangle srcS = { 0, 0, (float)INTERNAL_W, -(float)INTERNAL_H };
+  Rectangle dstS = { 0, 0, (float)sw, (float)sh };
+  DrawTexturePro(gGfx.scene.texture, srcS, dstS, Vector2{ 0, 0 }, 0, WHITE);
   EndShaderMode();
+
+  // ---- ACTOR pass: full-res, crisp. You, the phone, items, the spectres.
+  // Occlusion against the low-res world depth keeps them behind walls.
+  rlDrawRenderBatchActive();
+  glClearDepthHack();
+  rlEnableDepthTest();
+  rlSetClipPlanes(0.05, 320.0);   // MUST match the world pass for depth compare
+  BeginMode3D(gPlayer.cam);
+  SetWorldUniforms(time, lightI, eye, fwd);
+  float ares[2] = { (float)sw, (float)sh };
+  int occ1 = 1, depthSlot = 9;
+  for (int i = 0; i < 2; i++) {
+    Shader sh2 = i ? gGfx.worldInst : gGfx.world;
+    rlEnableShader(sh2.id);
+    SetShaderValue(sh2, GetShaderLocation(sh2, "occlude"), &occ1, SHADER_UNIFORM_INT);
+    SetShaderValue(sh2, GetShaderLocation(sh2, "uResActor"), ares, SHADER_UNIFORM_VEC2);
+    rlActiveTextureSlot(depthSlot); rlEnableTexture(gGfx.scene.depth.id);
+    int ds = depthSlot;
+    SetShaderValue(sh2, GetShaderLocation(sh2, "texWorldDepth"), &ds, SHADER_UNIFORM_INT);
+    rlActiveTextureSlot(0);
+  }
+  for (auto& e : gEntities) if (!e.removed && e.visible) EntityDraw(e, time);
+  if (gState == GS_PLAY || gState == GS_PAUSE) {
+    rlDrawRenderBatchActive();
+    glClearDepthHack();              // hand never clips the world or actors
+    int occ0b = 0;
+    SetShaderValue(gGfx.world, GetShaderLocation(gGfx.world, "occlude"), &occ0b, SHADER_UNIFORM_INT);
+    HandDraw(time, gDir.stress);
+  }
+  EndMode3D();
+
+  // ---- UI pass: full-res 2D, crisp text. Scaled from internal coords.
+  float uiScale = (float)sw / INTERNAL_W;
+  Camera2D ui = { 0 }; ui.zoom = uiScale;
+  BeginMode2D(ui);
+  HudDraw(time, gDir.stress);
+  EndMode2D();
+
   EndDrawing();
 }

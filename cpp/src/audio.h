@@ -369,6 +369,10 @@ void SfxHeartThump(float k) {
 void SfxBreathPlayer(float intensity) {
   Fire(V_BREATH, 1.1f, 0.3f, 0.012f + intensity * 0.05f, 0, 0.02f, 0, 0, 1, 1, 0, 0, 0, BUS_VOICE);
 }
+void SfxChargeTick() { // soft electric pip while charging
+  Fire(V_TONE, 0.12f, 0.004f, 0.07f, 0.2f, 0.1f, 0, 0, 1, 0, 1200, 1320, 0, BUS_SFX);
+  Fire(V_NOISE, 0.4f, 0.05f, 0.03f, 0, 0.1f, 700, 700, 4.0f, 1, 0, 0, 0, BUS_SFX); // hum
+}
 void SfxThunder() {
   Fire(V_NOISE, 2.6f, 0.02f, 0.6f, frand2() * 0.4f, 0.6f, 90, 40, 0.7f, 0, 0, 0, 0, BUS_AMBIENT);
   Fire(V_NOISE, 1.2f, 0.005f, 0.4f, frand2() * 0.5f, 0.5f, 1800, 200, 0.9f, 0, 0, 0, 0, BUS_AMBIENT);

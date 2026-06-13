@@ -71,6 +71,20 @@ void InvUpdate(float dt) {
 
 void PhoneUpdate(float dt, float time, bool indoor, bool entitiesNear, float stress) {
   gPhone.messageT = fmaxf(0, gPhone.messageT - dt);
+  // charging: 5s, fills battery, cancelled if you walk away
+  if (gPhone.charging) {
+    if (gPlayer.moving) { gPhone.charging = false; gPhone.message = "UNPLUGGED"; gPhone.messageT = 2; }
+    else {
+      gPhone.chargeT += dt;
+      gPhone.battery = fminf(100.0f, gPhone.battery + (100.0f / 5.0f) * dt);
+      gPhone.lightOn = true;
+      static float pip = 0; pip -= dt;
+      if (pip <= 0) { pip = 0.5f; SfxChargeTick(); }
+      if (gPhone.chargeT >= 5.0f || gPhone.battery >= 100.0f) {
+        gPhone.charging = false; gPhone.battery = 100; gPhone.message = "FULLY CHARGED"; gPhone.messageT = 3; SfxBeep(false);
+      }
+    }
+  }
   // drain
   float rate = 0.025f;
   if (gPhone.lightOn) rate += 0.062f;
@@ -112,52 +126,64 @@ static const char* CorruptText(const char* in, float lvl, char* buf, int bufLen)
 
 void PhoneDrawScreen(float time, float stress) {
   float s = stress / 100.0f;
+  const float PW = PHONE_SCR_W, PH = PHONE_SCR_H;   // 384 x 768 — crisp, legible
   BeginTextureMode(gGfx.phoneScr);
   if (gPhone.battery <= 0) { ClearBackground(BLACK); EndTextureMode(); return; }
   ClearBackground(Color{ 4, 7, 10, 255 });
-  // sensor noise
-  for (int i = 0; i < 40; i++)
-    DrawRectangle(GetRandomValue(0, PHONE_SCR_W), GetRandomValue(0, PHONE_SCR_H), 2, 2, Fade(WHITE, 0.03f));
-  // battery
+  for (int i = 0; i < 60; i++)
+    DrawRectangle(GetRandomValue(0, (int)PW), GetRandomValue(0, (int)PH), 3, 3, Fade(WHITE, 0.03f));
+  // top bar: battery
   int bat = (int)ceilf(gPhone.battery);
-  Color bc = bat < 20 ? (sinf(time * 8) > 0 ? Color{ 255, 59, 48, 255 } : Color{ 122, 29, 24, 255 }) : Color{ 154, 223, 154, 255 };
-  DrawTextEx(gGfx.font, TextFormat("%d%%", bat), { 8, 8 }, 16, 1, bc);
-  DrawRectangleLines(48, 9, 26, 13, bc);
-  DrawRectangle(50, 11, (int)(22 * bat / 100.0f), 9, bc);
-  DrawRectangle(74, 12, 3, 6, bc);
-  // clock — wrong at high stress
-  DrawTextEx(gGfx.font, s > 0.7f ? "??:??" : TextFormat("03:%02d", 33 + ((int)(time / 60)) % 27), { PHONE_SCR_W - 44.0f, 8 }, 14, 1, Color{ 102, 102, 119, 255 });
+  Color bc = bat < 20 ? (sinf(time * 8) > 0 ? Color{ 255, 70, 60, 255 } : Color{ 130, 34, 28, 255 }) : Color{ 150, 230, 150, 255 };
+  DrawTextEx(gGfx.font, TextFormat("%d%%", bat), { 16, 16 }, 32, 1, bc);
+  DrawRectangleLines(110, 20, 52, 26, bc);
+  DrawRectangle(114, 24, (int)(44 * bat / 100.0f), 18, bc);
+  DrawRectangle(162, 27, 5, 12, bc);
+  // charging bolt
+  if (gPhone.charging) DrawTextEx(gGfx.font, "CHG", { 200, 16 }, 26, 1, Color{ 150, 230, 150, (unsigned char)(150 + 100 * sinf(time * 10)) });
+  // clock
+  DrawTextEx(gGfx.font, s > 0.7f ? "??:??" : TextFormat("03:%02d", 33 + ((int)(time / 60)) % 27), { PW - 90, 16 }, 28, 1, Color{ 110, 110, 125, 255 });
   // objective
   char buf[96];
   if (!gPhone.objective.empty()) {
     CorruptText(gPhone.objective.c_str(), s, buf, 96);
-    Vector2 m = MeasureTextEx(gGfx.font, buf, 11, 1);
-    DrawTextEx(gGfx.font, buf, { (PHONE_SCR_W - m.x) / 2, 38 }, 11, 1, Fade(Color{ 220, 220, 230, 255 }, 0.85f - s * 0.3f));
+    Vector2 m = MeasureTextEx(gGfx.font, buf, 24, 1);
+    DrawTextEx(gGfx.font, buf, { (PW - m.x) / 2, 78 }, 24, 1, Fade(Color{ 222, 222, 232, 255 }, 0.9f - s * 0.25f));
   }
-  // message
+  // transient message — big and clear
   if (gPhone.messageT > 0 && sinf(time * 6) > -0.4f) {
     CorruptText(gPhone.message.c_str(), s, buf, 96);
-    Vector2 m = MeasureTextEx(gGfx.font, buf, 17, 1);
-    DrawTextEx(gGfx.font, buf, { (PHONE_SCR_W - m.x) / 2, PHONE_SCR_H / 2.0f - 10 }, 17, 1, Color{ 235, 230, 225, 242 });
+    Vector2 m = MeasureTextEx(gGfx.font, buf, 36, 1);
+    DrawTextEx(gGfx.font, buf, { (PW - m.x) / 2, PH / 2 - 24 }, 36, 1, Color{ 238, 232, 226, 245 });
   }
-  // stamina strip (the phone watches your pulse too)
-  DrawRectangle(8, PHONE_SCR_H - 50, (int)(50 * gPlayer.stamina / 100.0f), 3, gPlayer.exhausted ? Color{ 200, 60, 50, 200 } : Color{ 120, 130, 150, 160 });
-  if (s > 0.45f && frand() < 0.4f)
-    DrawTextEx(gGfx.font, "* WATCHING *", { 56, 70 }, 10, 1, Fade(Color{ 200, 60, 55, 255 }, (s - 0.45f) * 1.2f));
+  // charging progress bar
+  if (gPhone.charging) {
+    float cw = PW - 80;
+    DrawRectangleLines(40, PH / 2 + 60, (int)cw, 22, Color{ 90, 110, 90, 255 });
+    DrawRectangle(43, PH / 2 + 63, (int)(cw * gPhone.chargeT / 5.0f), 16, Color{ 110, 220, 120, 230 });
+    Vector2 m = MeasureTextEx(gGfx.font, "CHARGING", 22, 1);
+    DrawTextEx(gGfx.font, "CHARGING", { (PW - m.x) / 2, PH / 2 + 30 }, 22, 1, Color{ 150, 230, 150, 255 });
+  }
+  // stamina strip
+  DrawRectangle(16, PH - 96, (int)(96 * gPlayer.stamina / 100.0f), 6, gPlayer.exhausted ? Color{ 200, 60, 50, 200 } : Color{ 120, 130, 150, 160 });
+  if (s > 0.45f && frand() < 0.4f) {
+    Vector2 m = MeasureTextEx(gGfx.font, "WATCHING", 22, 1);
+    DrawTextEx(gGfx.font, "WATCHING", { (PW - m.x) / 2, 150 }, 22, 1, Fade(Color{ 210, 64, 58, 255 }, (s - 0.45f) * 1.2f));
+  }
   // REC — always
-  DrawCircle(14, PHONE_SCR_H - 22, 5, sinf(time * 3.5f) > 0 ? Color{ 255, 59, 48, 255 } : Fade(Color{ 255, 59, 48, 255 }, 0.25f));
-  DrawTextEx(gGfx.font, "REC", { 24, PHONE_SCR_H - 28.0f }, 12, 1, Color{ 187, 187, 187, 255 });
+  DrawCircle(28, PH - 44, 10, sinf(time * 3.5f) > 0 ? Color{ 255, 70, 60, 255 } : Fade(Color{ 255, 70, 60, 255 }, 0.25f));
+  DrawTextEx(gGfx.font, "REC", { 46, PH - 56 }, 26, 1, Color{ 190, 190, 190, 255 });
   int rt = (int)time;
-  DrawTextEx(gGfx.font, TextFormat("%02d:%02d:%02d", rt / 3600, (rt / 60) % 60, rt % 60), { 58, PHONE_SCR_H - 27.0f }, 10, 1, Color{ 85, 85, 85, 255 });
+  DrawTextEx(gGfx.font, TextFormat("%02d:%02d:%02d", rt / 3600, (rt / 60) % 60, rt % 60), { 130, PH - 52 }, 20, 1, Color{ 90, 90, 90, 255 });
   if (bat < 20 && sinf(time * 5) > 0) {
-    DrawTextEx(gGfx.font, "LOW BATTERY", { 46, PHONE_SCR_H - 64.0f }, 14, 1, Color{ 255, 59, 48, 255 });
+    Vector2 m = MeasureTextEx(gGfx.font, "LOW BATTERY", 28, 1);
+    DrawTextEx(gGfx.font, "LOW BATTERY", { (PW - m.x) / 2, PH - 128 }, 28, 1, Color{ 255, 70, 60, 255 });
   }
-  // glitch bands
   if (s > 0.4f) {
     int n = (int)((s - 0.4f) * 12);
     for (int i = 0; i < n; i++) {
-      int y = GetRandomValue(0, PHONE_SCR_H);
-      DrawRectangle(GetRandomValue(-12, 12), y, PHONE_SCR_W, GetRandomValue(2, 7), Fade(frand() < 0.5f ? WHITE : Color{ 255, 40, 40, 255 }, 0.07f));
+      int y = GetRandomValue(0, (int)PH);
+      DrawRectangle(GetRandomValue(-24, 24), y, (int)PW, GetRandomValue(3, 12), Fade(frand() < 0.5f ? WHITE : Color{ 255, 40, 40, 255 }, 0.07f));
     }
   }
   EndTextureMode();
@@ -290,6 +316,18 @@ void HudDraw(float time, float stress) {
     }
     x += 42;
   }
+  // lore note reading panel — centered, legible
+  if (!gDir.readingNote.empty()) {
+    int pw = 300, ph2 = 150;
+    int px = (INTERNAL_W - pw) / 2, py = (INTERNAL_H - ph2) / 2;
+    DrawRectangle(0, 0, INTERNAL_W, INTERNAL_H, Fade(BLACK, 0.55f));
+    DrawRectangle(px, py, pw, ph2, Color{ 18, 16, 13, 245 });
+    DrawRectangleLines(px, py, pw, ph2, Color{ 74, 68, 54, 255 });
+    DrawTextEx(gGfx.font, gDir.readingNote.c_str(), { (float)px + 16, (float)py + 16 }, 11, 1, Color{ 206, 200, 184, 255 });
+    DrawTextEx(gGfx.font, "[E] CLOSE", { (float)px + pw - 70, (float)py + ph2 - 16 }, 9, 1, Color{ 120, 116, 104, 255 });
+    return; // suppress the rest of the HUD while reading
+  }
+
   // prompt
   if (!gDir.ended) {
     std::string pr = (gDir.codeBuffer[0] != '\xFF')

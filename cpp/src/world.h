@@ -107,7 +107,7 @@ static void BuildTextures() {
     for (int i = 0; i < 260; i++)
       ImageDrawRectangle(&img, GetRandomValue(0, 252), GetRandomValue(0, 72), 2, 9, Color{ 0, 0, 0, (unsigned char)GetRandomValue(20, 70) });
     ImageDrawText(&img, "< EL POZO", 50, 14, 20, Color{ 190, 178, 160, 95 });
-    ImageDrawText(&img, "siete dias", 76, 48, 10, Color{ 150, 60, 56, 110 });
+    ImageDrawText(&img, "no mires dentro", 56, 48, 10, Color{ 150, 60, 56, 110 });
     texWellSign = LoadTextureFromImage(img); UnloadImage(img);
   }
   { // fountain plaque
@@ -512,6 +512,77 @@ void WorldTick(float dt, float time) {
   }
 }
 
+// seal the start: a wall of fallen trees + boulders so the path has a clear
+// beginning and you never see a disconnected trail behind you
+static void BuildStartBarrier() {
+  float z0 = 208.0f;
+  // collider across the whole corridor
+  AddBoxCol(-45, 45, z0, z0 + 5);
+  // big fallen logs lying across the path
+  for (int i = 0; i < 4; i++) {
+    float x = pathX(z0) - 9 + i * 6 + frand2() * 1.5f;
+    AddItem(GenMeshCylinder(0.5f + frand() * 0.2f, 7 + frand() * 3, 7),
+      MTRS3({ x, 0.5f, z0 + frand() * 2 }, { 0, 0, PI / 2 + frand2() * 0.15f }, { 1, 1, 1 }),
+      texBark, Color{ 96, 84, 72, 255 }, 0.03f);
+    AddCircleCol(x, z0 + 1, 0.7f);
+  }
+  // boulders + a dense thicket of trees behind to block sightlines
+  InstancedSet wall{ mshTrunk, texBark, Color{ 70, 66, 60, 255 }, 0.02f };
+  for (int i = 0; i < 60; i++) {
+    float x = -42 + frand() * 84;
+    float z = z0 + 2 + frand() * 26;
+    float s = 0.9f + frand() * 0.9f;
+    wall.mats.push_back(MTRS3({ x, 0, z }, { frand2() * 0.1f, frand() * 6.28f, frand2() * 0.1f }, { s, s * 1.3f, s }));
+    AddCircleCol(x, z, 0.4f * s);
+  }
+  gWorld.instanced.push_back(wall);
+  InstancedSet bd{ mshRock, texStone, Color{ 120, 120, 114, 255 }, 0.05f };
+  for (int i = 0; i < 18; i++) {
+    float x = -40 + frand() * 80, z = z0 + frand() * 4;
+    float s = 1.0f + frand() * 1.8f;
+    bd.mats.push_back(MTRS3({ x, 0.1f, z }, { 0, frand() * 6.28f, 0 }, { s, s * 0.8f, s }));
+    AddCircleCol(x, z, s * 0.5f);
+  }
+  gWorld.instanced.push_back(bd);
+}
+
+// a still pond + reeds to fill an empty stretch of forest
+static void BuildPond(float cx, float cz, float r) {
+  AddItem(GenMeshCylinder(r, 0.04f, 16), MatrixTranslate(cx, 0.03f, cz), gGfx.white,
+    Color{ 10, 16, 20, 255 }, 0.9f, false, 0, 0.0f);
+  // muddy rim
+  for (int i = 0; i < 14; i++) {
+    float a = i / 14.0f * 2 * PI;
+    AddItem(mshStone, MTRS3({ cx + cosf(a) * r, 0.05f, cz + sinf(a) * r }, { 0, frand() * 6.28f, 0 }, { 1.6f, 0.8f, 1.6f }),
+      texStone, Color{ 90, 84, 72, 255 }, 0.04f);
+  }
+  AddCircleCol(cx, cz, r + 0.3f);
+  // reeds (tall grass) around it
+  // (handled by ferns/grass density nearby in BuildForest)
+}
+
+// scattered detail to kill empty space: mushroom rings, mossy stumps, debris
+static void BuildClutter() {
+  InstancedSet shrooms{ mshStone, texPale, Color{ 198, 190, 178, 255 }, 0.05f };
+  for (int i = 0; i < 240; i++) {
+    float z = -140 + frand() * 350, x = -130 + frand() * 260;
+    if (distToPath(x, z) < 2.0f) continue;
+    if (fabsf(x) < 8 && fabsf(z + 110) < 7) continue;
+    float s = 0.5f + frand() * 0.7f;
+    shrooms.mats.push_back(MTRS3({ x, 0.12f, z }, { 0, frand() * 6.28f, 0 }, { s, s * 0.7f, s }));
+  }
+  gWorld.instanced.push_back(shrooms);
+  // mossy stumps
+  InstancedSet stumps{ mshTrunk, texBark, Color{ 70, 78, 56, 255 }, 0.02f };
+  for (int i = 0; i < 50; i++) {
+    float z = -140 + frand() * 350, x = -125 + frand() * 250;
+    if (distToPath(x, z) < 2.5f) continue;
+    float s = 0.7f + frand() * 0.5f;
+    stumps.mats.push_back(MTRS3({ x, 0, z }, { 0, frand() * 6.28f, 0 }, { s, 0.18f, s }));
+  }
+  gWorld.instanced.push_back(stumps);
+}
+
 void WorldBuild() {
   BuildTextures();
   BuildTerrain();
@@ -520,9 +591,19 @@ void WorldBuild() {
   BuildSigns();
   BuildWell();
   BuildCabin();
+  BuildStartBarrier();
+  BuildPond(40, 96, 4.5f);
+  BuildPond(-46, -70, 3.5f);
+  BuildClutter();
   BuildSkyEyes();
   mshCube = GenMeshCube(1, 1, 1);
   HouseBuild();
+  // lore note props (paper) lying in the world — see director for the text
+  Mesh nq = QuadMesh(0.26f, 0.34f);
+  AddItem(nq, MTRS3({ pathX(150) + 1.2f, 0.07f, 150 }, { -PI / 2, 0.4f, 0 }, { 1, 1, 1 }), texNote, WHITE, 0, false, 0.10f);
+  AddItem(nq, MTRS3({ gWorld.fountain.x - 2.4f, 0.90f, gWorld.fountain.z - 1.4f }, { -PI / 2, 1.1f, 0 }, { 1, 1, 1 }), texNote, WHITE, 0, false, 0.10f);
+  AddItem(nq, MTRS3({ gWorld.cabin.x - 1.6f, 0.86f, gWorld.cabin.z + 0.9f }, { -PI / 2, 0.2f, 0 }, { 1, 1, 1 }), texNote, WHITE, 0, false, 0.10f);
+  AddItem(nq, MTRS3({ -3.4f, 0.49f, -107.8f }, { -PI / 2, 0.6f, 0 }, { 1, 1, 1 }), texNote, WHITE, 0, false, 0.10f);
 }
 
 // ------------------------------------------------------------ draw
