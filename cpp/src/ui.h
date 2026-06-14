@@ -102,7 +102,18 @@ static void DrawSettings(float t, Vector2 mouse, bool click, bool down) {
   Slider("MOUSE SENS", &gCfg.mouseSens, 145, 4, mouse, down); // 0..1 maps to 0..2x below
   AudioSetVolumes(gCfg.volMaster, gCfg.volMusic, gCfg.volAmbient, gCfg.volVoices);
 
-  TextC("- CONTROLS -  (click, then press a key)", 172, 10, 2, Color{ 110, 110, 120, 255 });
+  // display mode: borderless windowed <-> exclusive fullscreen
+  {
+    const char* dl = gCfg.fullscreen ? "DISPLAY:  FULLSCREEN" : "DISPLAY:  BORDERLESS WINDOW";
+    Rectangle r = { INTERNAL_W / 2 - 120, 156, 240, 14 };
+    bool hov = Hit(r, mouse);
+    DrawRectangleLinesEx(r, 1, Fade(hov ? Color{ 210, 210, 218, 255 } : Color{ 90, 90, 100, 255 }, 0.9f));
+    Vector2 dm = MeasureTextEx(gGfx.font, dl, 10, 2);
+    DrawTextEx(gGfx.font, dl, { (INTERNAL_W - dm.x) / 2, 158 }, 10, 2, hov ? Color{ 235, 235, 240, 255 } : Color{ 175, 175, 182, 255 });
+    if (hov && click && gRebindAction < 0) { gCfg.fullscreen = !gCfg.fullscreen; ApplyDisplayMode(gCfg.fullscreen); CfgSave(); }
+  }
+
+  TextC("- CONTROLS -  (click, then press a key)", 174, 10, 2, Color{ 110, 110, 120, 255 });
   float y = 188;
   for (int a = 0; a < ACT_COUNT; a++) {
     float rx = INTERNAL_W / 2 - 130;

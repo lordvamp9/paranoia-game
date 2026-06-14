@@ -1,0 +1,16 @@
+# Godot
+.godot/
+.import/
+export_presets.cfg
+
+# GDExtension build artifacts
+gdextension/godot-cpp/
+gdextension/bin/*.dll
+gdextension/bin/*.so
+gdextension/bin/*.dylib
+*.os
+*.obj
+
+# Runtime files
+paranoia.cfg
+paranoia.sav

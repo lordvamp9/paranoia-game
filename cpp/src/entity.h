@@ -53,6 +53,27 @@ bool EntityLit(const Entity& e) {
   return Vector3DotProduct(f, to) > 0.82f;
 }
 
+// push a spawn point out of any tree it landed inside (BUG-4, DEBUG_PHYSICS §1)
+static Vector3 ValidateSpawn(Vector3 p) {
+  for (int iter = 0; iter < 4; iter++) {
+    bool moved = false;
+    for (auto& c : gWorld.circles) {
+      float dx = p.x - c.x, dz = p.z - c.z;
+      float d2 = dx * dx + dz * dz, r = c.r + 0.6f;
+      if (d2 < r * r && d2 > 1e-6f) {
+        float d = sqrtf(d2);
+        p.x = c.x + dx / d * r; p.z = c.z + dz / d * r;
+        moved = true;
+      }
+    }
+    if (!moved) break;
+#ifdef DEV_CONSOLE
+    if (iter == 0) printf("[spawn] nudged out of tree at (%.1f, %.1f)\n", p.x, p.z);
+#endif
+  }
+  return p;
+}
+
 void SpawnShadow(Vector3 home, std::vector<Vector3> patrol, float aggression, bool lethal) {
   Entity e;
   e.kind = EKind::Shadow;
@@ -60,6 +81,7 @@ void SpawnShadow(Vector3 home, std::vector<Vector3> patrol, float aggression, bo
   e.patrol = patrol;
   e.aggression = aggression;
   e.lethal = lethal;
+  e.decay = 0.5f; e.heightScale = 1.05f;   // deteriorated, gaunt and tall
   e.audioVoice = AudioEntityVoice();
   gEntities.push_back(e);
 }
@@ -72,6 +94,7 @@ void SpawnSamara() {
   e.state = EState::Dormant;
   e.visible = false;
   e.lethal = true;
+  e.decay = 0.6f; e.heightScale = 0.82f;    // small, wet, ~1.47m
   e.audioVoice = AudioEntityVoice();
   gEntities.push_back(e);
 }
@@ -79,9 +102,11 @@ void SpawnSamara() {
 void SpawnWatcher(Vector3 at) {
   Entity e;
   e.kind = EKind::Watcher;
+  at = ValidateSpawn(at);          // never inside a tree
   e.home = at; e.pos = at;
   e.state = EState::Idle;
   e.lethal = false;
+  e.decay = 0.85f; e.heightScale = 1.14f;   // ancient, ethereal, tall ~2.05m
   gEntities.push_back(e);
 }
 
@@ -92,8 +117,15 @@ void SpawnCrawler(Vector3 home) {
   e.state = EState::Idle;
   e.aggression = 1.25f;
   e.lethal = true;
+  e.decay = 0.25f; e.heightScale = 1.0f;    // recently dead, opaque flesh
   e.audioVoice = AudioEntityVoice();
   gEntities.push_back(e);
+}
+
+// translucency by age: older entities are eaten more by the fog/dither
+static inline Color DecayTint(Color c, float decay) {
+  c.a = (unsigned char)Clamp((float)c.a * (1.0f - decay * 0.35f), 0.0f, 255.0f);
+  return c;
 }
 
 static void AlertOthers(Entity& self) {
@@ -311,6 +343,16 @@ void EntityUpdate(Entity& e, float dt, float time) {
       e.walkPhase += speed * dt * 1.45f; // stride drives the legs
     }
   }
+  // soft separation so pursuers don't merge into one body (BUG-3)
+  for (auto& o : gEntities) {
+    if (&o == &e || o.frozen || o.removed || o.kind == EKind::Watcher) continue;
+    float dx = e.pos.x - o.pos.x, dz = e.pos.z - o.pos.z;
+    float d2 = dx * dx + dz * dz, minD = 0.8f;
+    if (d2 < minD * minD && d2 > 1e-5f) {
+      float d = sqrtf(d2), push = (minD - d) * 0.5f;
+      e.pos.x += dx / d * push; e.pos.z += dz / d * push;
+    }
+  }
   if (frand() < dt * 1.2f) e.twitchT = 0.06f + frand() * 0.08f;
   e.twitchT = fmaxf(0, e.twitchT - dt);
 
@@ -473,41 +515,47 @@ void EntityDraw(Entity& e, float time) {
   float tw = (e.twitchT > 0) ? 1.0f : 0.0f;
   float jx = tw * frand2() * 0.05f, jz = tw * frand2() * 0.05f;
   Matrix W = MatrixMultiply(MatrixRotateY(e.facing), MatrixTranslate(e.pos.x + jx, e.pos.y, e.pos.z + jz));
+  // real-size variation: scale about the feet (local origin), width less than height
+  if (e.heightScale != 1.0f) {
+    float sx = 1.0f + (e.heightScale - 1.0f) * 0.5f;
+    W = MatrixMultiply(MatrixScale(sx, e.heightScale, sx), W);
+  }
+  float ha = 1.0f - e.decay * 0.35f; // hair fades with age too
 
   if (e.kind == EKind::Shadow) {
     // a gaunt ash-grey humanoid, translucent, long-armed; pale gaunt face
-    Color skin = { 78, 80, 92, 232 };
+    Color skin = DecayTint({ 78, 80, 92, 232 }, e.decay);
     BeginBlendMode(BLEND_ALPHA);
     EHumanoid(W, e, time, texSkin, skin, true);
     EndBlendMode();
-    DrawHair(L2W(W, 0, 1.92f, 0.04f), 0.36f, 0.5f, 0.7f);
+    DrawHair(L2W(W, 0, 1.92f, 0.04f), 0.36f, 0.5f, 0.7f * ha);
     DrawCylinderEx({ e.pos.x, 0.015f, e.pos.z }, { e.pos.x, 0.02f, e.pos.z }, 0.6f, 0.6f, 12, Fade(BLACK, 0.45f));
   } else if (e.kind == EKind::Crawler) {
-    Color flesh = { 196, 192, 182, 244 };
+    Color flesh = DecayTint({ 196, 192, 182, 244 }, e.decay);
     BeginBlendMode(BLEND_ALPHA);
     ECrawler(W, e, time, texSkin, flesh, true);
     EndBlendMode();
-    DrawHair(L2W(W, 0, 0.80f, 0.55f), 0.42f, 0.34f, 0.9f);
+    DrawHair(L2W(W, 0, 0.80f, 0.55f), 0.42f, 0.34f, 0.9f * ha);
   } else if (e.kind == EKind::Samara) {
-    Color gown = { 214, 218, 220, 246 };
+    Color gown = DecayTint({ 214, 218, 220, 246 }, e.decay);
     bool crawl = (e.state == EState::Pursuing || e.state == EState::Retreating);
     BeginBlendMode(BLEND_ALPHA);
     if (crawl) {
       ECrawler(W, e, time, texPale, gown, false);
       EndBlendMode();
-      DrawHair(L2W(W, 0, 0.78f, 0.62f), 0.5f, 0.72f, 0.97f); // long wet hair forward over the face
+      DrawHair(L2W(W, 0, 0.78f, 0.62f), 0.5f, 0.72f, 0.97f * ha); // long wet hair forward over the face
     } else {
       float k = (e.state == EState::Emerging) ? Clamp(e.stateT / 3.6f, 0.0f, 1.0f) : 1.0f;
       EHumanoid(W, e, time, texPale, gown, false);
       EndBlendMode();
-      DrawHair(L2W(W, 0, 1.80f, 0.05f), 0.52f, 0.95f, 0.97f * k); // curtain hides the face
+      DrawHair(L2W(W, 0, 1.80f, 0.05f), 0.52f, 0.95f, 0.97f * k * ha); // curtain hides the face
     }
   } else { // Watcher: pale woman, motionless, hair over the face
-    Color pale = { 188, 190, 186, 236 };
+    Color pale = DecayTint({ 188, 190, 186, 236 }, e.decay);
     e.speed = 0;
     BeginBlendMode(BLEND_ALPHA);
     EHumanoid(W, e, time, texPale, pale, false);
     EndBlendMode();
-    DrawHair(L2W(W, 0, 1.80f, 0.05f), 0.52f, 0.85f, 0.96f);
+    DrawHair(L2W(W, 0, 1.80f, 0.05f), 0.52f, 0.85f, 0.96f * ha);
   }
 }

@@ -10,7 +10,7 @@ Gfx gGfx;
 static struct {
   int viewPos, lightPos, lightDir, lightI, lightCut, fogD, ambientC, lightVP, shadowOn, specK, uTime, uSway, texNoise, texShadow;
 } ULoc[2]; // 0 world, 1 worldInst
-static struct { int uRes, uTime, uStress, uGlitch, uFlashW, uFlashB, uBattery; } UPost;
+static struct { int uRes, uTime, uStress, uGlitch, uFlashW, uFlashB, uBattery, uDanger; } UPost;
 
 static RenderTexture2D LoadDepthRT(int width, int height) {
   RenderTexture2D target = { 0 };
@@ -105,6 +105,7 @@ void GfxInit() {
   UPost.uFlashW = GetShaderLocation(gGfx.post, "uFlashW");
   UPost.uFlashB = GetShaderLocation(gGfx.post, "uFlashB");
   UPost.uBattery = GetShaderLocation(gGfx.post, "uBattery");
+  UPost.uDanger = GetShaderLocation(gGfx.post, "uDanger");
 
   gGfx.noiseTex = MakeNoiseTexture(256, Color{ 128, 128, 128, 255 }, 70);
   Image w = GenImageColor(4, 4, WHITE);
@@ -203,7 +204,9 @@ void GfxRenderFrame(float time, float dt) {
   // ---- POST: draw the dithered world full-screen
   float res[2] = { (float)INTERNAL_W, (float)INTERNAL_H };
   float st = gDir.stress / 100.0f;
-  float gl = gDir.glitch + (gDir.stress > 80 ? (gDir.stress - 80) / 100.0f : 0);
+  // low battery itself drives the psychosis glitch, not just stress (BATTERY_SYSTEM §2A)
+  float lowBat = gPhone.battery < 25.0f ? (25.0f - gPhone.battery) / 25.0f : 0.0f;
+  float gl = gDir.glitch + (gDir.stress > 80 ? (gDir.stress - 80) / 100.0f : 0) + lowBat * 0.6f;
   float bat = gPhone.battery / 100.0f;
   SetShaderValue(gGfx.post, UPost.uRes, res, SHADER_UNIFORM_VEC2);
   SetShaderValue(gGfx.post, UPost.uTime, &time, SHADER_UNIFORM_FLOAT);
@@ -212,6 +215,7 @@ void GfxRenderFrame(float time, float dt) {
   SetShaderValue(gGfx.post, UPost.uFlashW, &gDir.flashWhite, SHADER_UNIFORM_FLOAT);
   SetShaderValue(gGfx.post, UPost.uFlashB, &gDir.flashBlack, SHADER_UNIFORM_FLOAT);
   SetShaderValue(gGfx.post, UPost.uBattery, &bat, SHADER_UNIFORM_FLOAT);
+  SetShaderValue(gGfx.post, UPost.uDanger, &gDir.danger, SHADER_UNIFORM_FLOAT);
   BeginShaderMode(gGfx.post);
   Rectangle srcS = { 0, 0, (float)INTERNAL_W, -(float)INTERNAL_H };
   Rectangle dstS = { 0, 0, (float)sw, (float)sh };

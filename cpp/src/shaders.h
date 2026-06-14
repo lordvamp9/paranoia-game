@@ -141,6 +141,7 @@ uniform float uGlitch;
 uniform float uFlashW;
 uniform float uFlashB;
 uniform float uBattery;   // 0..1
+uniform float uDanger;    // 0 safe .. 1 entity here (red proximity vignette)
 out vec4 finalColor;
 
 float rand(vec2 co) { return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453); }
@@ -192,6 +193,13 @@ void main() {
     // vignette
     float vig = smoothstep(1.18 - s * 0.34, 0.28, length(dir) * 1.42);
     col *= mix(0.30, 1.0, vig);
+
+    // proximity danger: the edges bleed red as something gets close (no meter)
+    if (uDanger > 0.001) {
+        float edge = 1.0 - vig;                       // strong toward the frame edge
+        float pulse = 0.82 + 0.18 * sin(uTime * 6.0); // a slow heartbeat throb
+        col = mix(col, vec3(0.55, 0.02, 0.02), clamp(edge * uDanger * pulse, 0.0, 0.9));
+    }
 
     // low battery flicker
     if (uBattery < 0.2) {

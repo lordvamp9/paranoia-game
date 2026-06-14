@@ -59,7 +59,15 @@ static void CfgDefaults() {
   gCfg.keys[ACT_LIGHT] = KEY_F;
   gCfg.keys[ACT_INTERACT] = KEY_E;
   gCfg.volMaster = 0.9f; gCfg.volMusic = 0.7f; gCfg.volAmbient = 0.8f; gCfg.volVoices = 1.0f;
-  gCfg.mouseSens = 0.5f; gCfg.fullscreen = 1;
+  gCfg.mouseSens = 0.5f; gCfg.fullscreen = 0; // 0 = borderless windowed, 1 = exclusive fullscreen
+}
+
+// apply the chosen display mode (0 borderless windowed, 1 exclusive fullscreen)
+static void ApplyDisplayMode(int mode) {
+  if (IsWindowFullscreen()) ToggleFullscreen();                          // normalise to plain windowed
+  if (IsWindowState(FLAG_BORDERLESS_WINDOWED_MODE)) ToggleBorderlessWindowed();
+  if (mode == 1) ToggleFullscreen();
+  else ToggleBorderlessWindowed();
 }
 
 static const char* CfgPath() {

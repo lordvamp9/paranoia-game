@@ -1,0 +1,24 @@
+# PARANOIA GDExtension — SCons build (official godot-cpp workflow).
+#   Phase 1 setup (Session 2):
+#     cd godot/gdextension
+#     git clone -b 4.3 https://github.com/godotengine/godot-cpp
+#     scons platform=windows target=template_debug
+#   Output -> bin/libparanoia.windows.template_debug.x86_64.dll
+import os
+
+env = SConscript("godot-cpp/SConstruct")
+
+env.Append(CPPPATH=["src/"])
+sources = Glob("src/*.cpp")
+
+# Reuse the original game's pure-C++ logic headers (ported, raylib-free) from here:
+env.Append(CPPPATH=["src/core/"])
+
+if env["platform"] == "macos":
+    target = "bin/libparanoia.{}.{}.framework/libparanoia.{}.{}".format(
+        env["platform"], env["target"], env["platform"], env["target"])
+else:
+    target = "bin/libparanoia{}{}".format(env["suffix"], env["SHLIBSUFFIX"])
+
+library = env.SharedLibrary(target, source=sources)
+Default(library)

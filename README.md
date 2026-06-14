@@ -37,7 +37,9 @@ portable executable. No installation. Double-click and play.
 | `1`–`5` | Inventory |
 | `Esc` | Pause |
 
-Controls, audio levels and mouse sensitivity are all configurable in **Settings**.
+Controls, audio levels, mouse sensitivity and **display mode (borderless window
+or fullscreen)** are all configurable in **Settings**. `F11` toggles display mode
+in-game.
 
 A single playthrough runs about 30 minutes. There are two endings.
 

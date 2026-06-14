@@ -8,6 +8,7 @@ static int gE0 = -1;            // the phase-1 watcher (scripted)
 static float gE0moveT = -1; static Vector3 gE0from, gE0to;
 static float gWatcherT = 40;    // next watcher apparition
 static float gBreathT = 0, gHeartT = 0, gWhisperT = 9, gDripT = 4, gThunderT = 8;
+static float gCalmT = 0;        // pacing governor: time spent in total calm (LOOP_PACING §7)
 static bool fired[16] = { false };
 #define FIRE(n) (!fired[n] && (fired[n] = true))
 
@@ -19,6 +20,7 @@ void WorldResetDynamics();
 void DirectorReset() {
   gE0 = -1; gE0moveT = -1; gWatcherT = 40;
   gBreathT = gHeartT = 0; gWhisperT = 9; gDripT = 4; gThunderT = 8;
+  gCalmT = 0;
   for (int i = 0; i < 16; i++) fired[i] = false;
   gEntities.clear();
   gDir = Director{};
@@ -65,6 +67,7 @@ static void EnterHouse() {
   gDir.fInHouse = true;
   gPhone.objective = "FIND A WAY DOWN";
   Sub("Too quiet.", 4);
+  gPhone.message = "its in here with you. so are you."; gPhone.messageT = 4; // M16
   gDir.checkpoint = { 0, 0, -106.5f }; gDir.checkpointYaw = PI; // just inside, facing in
   AudioSetWind(0.25f);
   // interior stalker patrols the BACK of the house, never camps the doorway
@@ -101,6 +104,7 @@ static void Phase1Script(float time) {
     e0.pos = { pathX(z - 18) - 7, 0, z - 18 };
     gE0from = e0.pos; gE0to = { pathX(z - 19) + 8, 0, z - 19 }; gE0moveT = 0;
     gDir.stress += 12;
+    gPhone.message = "dont run. it likes when you run."; gPhone.messageT = 4; // M04
   }
   if (z < 150 && FIRE(1)) {
     Sub("Footsteps. Behind you.", 3.5f);
@@ -136,7 +140,8 @@ static void Phase1Script(float time) {
 
 static void Phase2Script() {
   Vector3 p = gPlayer.pos;
-  if (p.z < 30 && FIRE(5)) { SfxWhisper(); Sub("Whispers. They are not words.", 4); }
+  if (p.z < 30 && FIRE(5)) { SfxWhisper(); Sub("Whispers. They are not words.", 4);
+    gPhone.message = "she was in the car. wasnt she."; gPhone.messageT = 4; } // M07
   if (p.z < -20 && FIRE(6)) {
     for (auto& e : gEntities) {
       if (e.frozen || e.removed || e.kind != EKind::Shadow || !e.lethal) continue;
@@ -240,6 +245,14 @@ void DirectorInteract() {
       int n = it.id - 30;
       D.loreRead[n] = true;
       D.readingNote = gLore[n].text;
+      // inner-voice echo per note (M03/M14 family) — your own head, lowercase
+      static const char* echo[4] = {
+        "you wrote this. you dont remember.",
+        "we always come back.",
+        "she is still inside.",
+        "you came to give the rest back.",
+      };
+      gPhone.message = echo[n]; gPhone.messageT = 5;
       SfxPickup();
       return;
     }
@@ -262,7 +275,8 @@ void DirectorInteract() {
         return;
       case 4: D.fWellBattery = true; gWorld.items[gWorld.wellBatteryItem].tint.a = 0; InvGive(IT_BATTERY); return;
       case 5:
-        if (!D.fDrawerOpen) { D.fDrawerOpen = true; OpenDrawer(); SfxBranch(0.2f); }
+        if (!D.fDrawerOpen) { D.fDrawerOpen = true; OpenDrawer(); SfxBranch(0.2f);
+          gPhone.message = "her face. almost. then its gone."; gPhone.messageT = 4; } // M18
         else { D.fKitchenKey = true; InvGive(IT_KITCHENKEY); gPhone.message = "KITCHEN KEY"; gPhone.messageT = 3; gPhone.objective = "THE BEDROOM UPSTAIRS"; }
         return;
       case 6:
@@ -272,6 +286,7 @@ void DirectorInteract() {
         SpawnCrawler({ HX - 1.5f, 0, HZ - 3.6f }); // it was under the bed
         gEntities.back().pos.y = 3.1f; gEntities.back().home.y = 3.1f;
         SfxEntityCry({ HX - 1.5f, 3.1f, HZ - 3.6f }, 3);
+        gPhone.message = "something under the bed is breathing."; gPhone.messageT = 4; // M20
         return;
       case 7:
         if (!(D.fWaterKey || D.fMirrorSolved)) { SfxBeep(true); return; }
@@ -359,6 +374,32 @@ void DirectorUpdate(float dt, float time) {
   D.catchCooldown = fmaxf(0, D.catchCooldown - dt);
   D.graceT = fmaxf(0, D.graceT - dt);
 
+  // ---- psychosis: the leash runs out at 0% battery (BATTERY_SYSTEM §2B)
+  if (!D.psychosis && gPhone.battery <= 0 && gPlayer.enabled) {
+    D.psychosis = true; D.psychosisT = 0;
+    gPlayer.enabled = false;
+    D.stress = 100; D.glitch = 3.0f;
+    SfxScare(); SfxHeartThump(1.0f);
+    Big("THE MIND BROKE", 3.2f);
+    for (auto& e : gEntities)               // everything converges on you
+      if (!e.frozen && !e.removed && e.lethal) { e.state = EState::Hunting; e.lastSeen = gPlayer.pos; e.stateT = 0; }
+  }
+  if (D.psychosis) {
+    D.psychosisT += dt;
+    D.glitch = fmaxf(D.glitch, 1.6f);
+    D.flashBlack = fminf(1.0f, D.psychosisT * 0.42f);
+    if (D.psychosisT >= 4.0f) {              // the loop reclaims you — respawn, don't softlock
+      D.psychosis = false;
+      PlayerTeleport(D.checkpoint.x, D.checkpoint.z, D.checkpointYaw);
+      gPhone.battery = 30; gPhone.lightOn = true; gPlayer.enabled = true;
+      D.stress = 70; D.glitch = 1.0f; D.graceT = 4.5f; D.catchCooldown = 5;
+      for (auto& e : gEntities)
+        if (!e.frozen && !e.removed && e.lethal && e.kind != EKind::Samara) { e.pos = e.home; e.state = EState::Retreating; e.stateT = 0; }
+      Big("YOU ARE BEING OBSERVED", 3.0f);
+    }
+    return; // world frozen during the collapse
+  }
+
   if (D.phase == 1) Phase1Script(time);
   else if (D.phase == 2) Phase2Script();
   if (D.phase >= 3) Phase3Script();
@@ -399,6 +440,7 @@ void DirectorUpdate(float dt, float time) {
     if ((e.state == EState::Pursuing || e.state == EState::Hunting || e.state == EState::Emerging) && d < 30) pursuit = true;
     if (e.kind == EKind::Samara && e.state != EState::Dormant) samaraOut = true;
   }
+  if (samaraOut && FIRE(10)) { gPhone.message = "dont look at the water."; gPhone.messageT = 4; } // M13
   if (pursuit) D.stress += (samaraOut ? 12.0f : 9.0f) * dt;
   else if (nearest < 9) D.stress += 4.5f * dt;
   else if (nearest < 16) D.stress += 1.5f * dt;
@@ -412,6 +454,22 @@ void DirectorUpdate(float dt, float time) {
   if (gPlayer.groundY < -1) D.stress += 0.8f * dt;
   D.stress = Clamp(D.stress, 0, 100);
   D.entitiesNear = pursuit && nearest < 14;
+  // graded proximity danger → red vignette (UI_UX §5): no meter, just the screen
+  float dTarget = 0;
+  if (pursuit && nearest < 18) dTarget = Clamp((18 - nearest) / 14.0f, 0.25f, 1.0f);
+  else if (nearest < 10) dTarget = (10 - nearest) / 10.0f * 0.45f;
+  D.danger += (dTarget - D.danger) * fminf(1.0f, dt * 4.0f);
+
+  // ---- pacing governor: keep tension off the floor (LOOP_PACING §7)
+  // a long stretch of total calm earns a small dread beat — never fully safe.
+  if (pursuit || nearest < 14 || D.stress > 25) gCalmT = 0;
+  else gCalmT += dt;
+  if (gPlayer.enabled && D.phase >= 1 && gPlayer.groundY > -1 && D.stress < 18 && gCalmT > 22.0f) {
+    gCalmT = -(8.0f + frand() * 14.0f); // cooldown (negative) before the next nudge
+    SfxWhisper();
+    D.stress += 6; D.glitch += 0.25f;
+    if (frand() < 0.4f) SfxBranch(frand2());
+  }
 
   // sign code reveal (precise light angle)
   {
@@ -505,5 +563,19 @@ void DirectorUpdate(float dt, float time) {
       D.flashWhite = fmaxf(D.flashWhite, 0.18f); // distant lightning
       D.stress += 2;
     }
+  }
+
+  // object-pool hygiene: actually erase spent entities (watchers) so the list
+  // never grows unbounded over a long session (BUG-1, DEBUG_PHYSICS §1).
+  // Safe re: gE0 — only watchers get removed, and they always spawn after it.
+  if (gEntities.size() > 12) {
+    size_t before = gEntities.size();
+    gEntities.erase(std::remove_if(gEntities.begin(), gEntities.end(),
+      [](const Entity& e) { return e.removed; }), gEntities.end());
+#ifdef DEV_CONSOLE
+    if (gEntities.size() != before) printf("[pool] compacted: %zu -> %zu\n", before, gEntities.size());
+#else
+    (void)before;
+#endif
   }
 }

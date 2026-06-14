@@ -49,12 +49,12 @@ int main(int argc, char** argv) {
   SetTraceLogLevel(LOG_WARNING);
   SetConfigFlags(FLAG_VSYNC_HINT);
   InitWindow(1280, 720, "PARANOIA");
-  if (!windowed && !shotMode) ToggleBorderlessWindowed();
   SetExitKey(KEY_NULL);
   SetRandomSeed(0x9A4F0911u);
 
   GfxInit();
   CfgLoad();
+  if (!windowed && !shotMode) ApplyDisplayMode(gCfg.fullscreen); // borderless / fullscreen from settings
   WorldBuild();
   if (!shotMode) { AudioInit(); AudioSetVolumes(gCfg.volMaster, gCfg.volMusic, gCfg.volAmbient, gCfg.volVoices); }
 
@@ -114,6 +114,35 @@ int main(int argc, char** argv) {
     bool samaraUp = false; for (auto& e : gEntities) if (e.kind == EKind::Samara && e.state != EState::Dormant) samaraUp = true;
     CHECK("samara emerges", samaraUp);
     DirectorKey(KEY_Q); CHECK("ending refuse", gDir.ended && gDir.ending == 2);
+    // psychosis: 0% battery -> collapse -> loop reclaims you (respawn @30%)
+    gDir.ended = false; gDir.psychosis = false; gPlayer.enabled = true;
+    gDir.checkpoint = { 0, 0, 200 }; gDir.checkpointYaw = 0; gPhone.battery = 0;
+    DirectorUpdate(1.0f / 60.0f, 0);
+    bool pStarted = gDir.psychosis && !gPlayer.enabled;
+    int guard = 0; while (gDir.psychosis && guard++ < 600) DirectorUpdate(1.0f / 60.0f, guard / 60.0f);
+    CHECK("psychosis death at 0% battery", pStarted);
+    CHECK("psychosis respawns @30% + re-enable", !gDir.psychosis && gPlayer.enabled && gPhone.battery > 25 && gPhone.battery <= 35);
+    // pacing governor: a long calm earns a dread beat (tension never hits 0)
+    DirectorReset();
+    gDir.phase = 2; gPlayer.enabled = true; gPlayer.groundY = 0; gDir.stress = 0;
+    PlayerTeleport(0, 100, 0); gCalmT = 0;
+    float calmPeak = 0;
+    for (int f = 0; f < 1600; f++) { DirectorUpdate(1.0f / 60.0f, f / 60.0f); calmPeak = fmaxf(calmPeak, gDir.stress); }
+    CHECK("pacing floor nudges tension in long calm", calmPeak > 4.5f);
+    // BUG-3: entity separation un-stacks overlapping spawns
+    DirectorReset();
+    SpawnShadow({ 0, 0, 0 }, {}, 1.0f, true);
+    SpawnShadow({ 0.05f, 0, 0.05f }, {}, 1.0f, true); // almost on top
+    for (int f = 0; f < 40; f++) for (auto& e : gEntities) EntityUpdate(e, 1.0f / 60.0f, f / 60.0f);
+    { float dx = gEntities[0].pos.x - gEntities[1].pos.x, dz = gEntities[0].pos.z - gEntities[1].pos.z;
+      CHECK("entity separation un-stacks overlap", dx * dx + dz * dz > 0.3f); }
+    // BUG-1: object pool compacts spent entities instead of growing forever
+    DirectorReset();
+    for (int i = 0; i < 20; i++) SpawnWatcher({ frand2() * 12, 0, frand2() * 12 });
+    { size_t before = gEntities.size();
+      for (auto& e : gEntities) e.removed = true;
+      gDir.phase = 2; DirectorUpdate(1.0f / 60.0f, 0);
+      CHECK("object pool compacts spent entities", gEntities.size() < before); }
     // reset path
     DirectorReset(); CHECK("reset clears entities", gEntities.empty() && !gDir.fWaterKey);
     printf("== %d pass, %d fail ==\n", pass, fail);
@@ -156,10 +185,10 @@ int main(int argc, char** argv) {
     Entity e;
     e.pos = { 0, 0, -3.4f }; e.home = e.pos; e.facing = 0; e.visible = true; e.frozen = true;
     e.state = (kind == 1) ? EState::Pursuing : EState::Idle; // samara crawling
-    if (kind == 0) e.kind = EKind::Shadow;
-    else if (kind == 1) { e.kind = EKind::Samara; e.walkPhase = 1.2f; }
-    else if (kind == 2) e.kind = EKind::Watcher;
-    else e.kind = EKind::Crawler;
+    if (kind == 0) { e.kind = EKind::Shadow; e.decay = 0.5f; e.heightScale = 1.05f; }
+    else if (kind == 1) { e.kind = EKind::Samara; e.walkPhase = 1.2f; e.decay = 0.6f; e.heightScale = 0.82f; }
+    else if (kind == 2) { e.kind = EKind::Watcher; e.decay = 0.85f; e.heightScale = 1.14f; }
+    else { e.kind = EKind::Crawler; e.decay = 0.25f; e.heightScale = 1.0f; }
     gEntities.push_back(e);
     for (int f = 0; f < 4; f++) { PlayerUpdate(1.0f / 60.0f, 0); gDir.flashBlack = 0; PhoneDrawScreen(0.5f, 20); GfxRenderFrame(1.2f, 1.0f / 60.0f); }
     TakeScreenshot(uiShot);
@@ -206,7 +235,7 @@ int main(int argc, char** argv) {
       if (ActPressed(ACT_LIGHT) && gPhone.battery > 0) { gPhone.lightOn = !gPhone.lightOn; SfxBeep(!gPhone.lightOn); }
       if (ActPressed(ACT_INTERACT)) DirectorInteract();
       for (int s = 0; s < 5; s++) if (IsKeyPressed(KEY_ONE + s)) InvSelect(s);
-      if (IsKeyPressed(KEY_F11)) ToggleBorderlessWindowed();
+      if (IsKeyPressed(KEY_F11)) { gCfg.fullscreen = !gCfg.fullscreen; ApplyDisplayMode(gCfg.fullscreen); CfgSave(); }
       if (IsKeyPressed(KEY_ESCAPE)) { gState = GS_PAUSE; gStateT = 0; }
 
       PlayerUpdate(dt, gDir.stress);

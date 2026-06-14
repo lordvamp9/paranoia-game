@@ -104,6 +104,8 @@ struct Entity {
   float stateT = 0, pauseT = 0, lostT = 0, recoilT = 0, speed = 0;
   float walkPhase = 0, twitchT = 0, emergeT = 0, cryT = 0;
   float aggression = 1.0f;
+  float decay = 0.5f;          // 0 recently-dead/opaque .. 1 ancient/ethereal (modulates alpha)
+  float heightScale = 1.0f;    // real size: Samara ~0.82, Watcher ~1.14 (see ENTITY_DESIGN §3)
   bool lethal = true, frozen = false, removed = false, visible = true;
   int huntRole = 0; // 0 chaser, 1 flanker
   Vector3 lastSeen{};
@@ -199,6 +201,8 @@ struct Director {
   std::string big; float bigT = 0;
   float flashWhite = 0, flashBlack = 0, glitch = 0;
   float rainVisual = 0;
+  float danger = 0;            // 0 safe .. 1 entity here — drives the red proximity vignette (UI_UX §5)
+  bool psychosis = false; float psychosisT = 0; // battery-0 death sequence (BATTERY_SYSTEM §2B)
 };
 extern Director gDir;
 void DirectorStart();

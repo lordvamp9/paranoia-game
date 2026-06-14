@@ -132,15 +132,30 @@ void PhoneDrawScreen(float time, float stress) {
   ClearBackground(Color{ 4, 7, 10, 255 });
   for (int i = 0; i < 60; i++)
     DrawRectangle(GetRandomValue(0, (int)PW), GetRandomValue(0, (int)PH), 3, 3, Fade(WHITE, 0.03f));
-  // top bar: battery
+  // top bar: battery — 4 colour tiers (BATTERY_SYSTEM §4A)
   int bat = (int)ceilf(gPhone.battery);
-  Color bc = bat < 20 ? (sinf(time * 8) > 0 ? Color{ 255, 70, 60, 255 } : Color{ 130, 34, 28, 255 }) : Color{ 150, 230, 150, 255 };
+  Color bc;
+  if (bat >= 75)      bc = Color{ 150, 230, 150, 255 };  // green
+  else if (bat >= 50) bc = Color{ 226, 214, 120, 255 };  // yellow
+  else if (bat >= 25) bc = Color{ 232, 158, 86, 255 };   // orange
+  else bc = (sinf(time * 8) > 0 ? Color{ 255, 70, 60, 255 } : Color{ 130, 34, 28, 255 }); // red, blinking
   DrawTextEx(gGfx.font, TextFormat("%d%%", bat), { 16, 16 }, 32, 1, bc);
   DrawRectangleLines(110, 20, 52, 26, bc);
   DrawRectangle(114, 24, (int)(44 * bat / 100.0f), 18, bc);
   DrawRectangle(162, 27, 5, 12, bc);
   // charging bolt
   if (gPhone.charging) DrawTextEx(gGfx.font, "CHG", { 200, 16 }, 26, 1, Color{ 150, 230, 150, (unsigned char)(150 + 100 * sinf(time * 10)) });
+  // signal: always weak (1-2 bars), flickers under stress — no rescue is coming
+  {
+    int lit = (s > 0.5f && frand() < 0.3f) ? 0 : (1 + (((int)time % 7 == 0) ? 1 : 0));
+    for (int i = 0; i < 4; i++) {
+      int bh = 6 + i * 5;
+      Color sc = (i < lit) ? Color{ 150, 200, 170, 255 } : Color{ 50, 60, 55, 200 };
+      DrawRectangle((int)PW - 152 + i * 8, 46 - bh, 5, bh, sc);
+    }
+  }
+  // new-message notification dot
+  if (gPhone.messageT > 0) DrawCircle((int)PW - 22, 28, 6, Color{ 255, 70, 60, 255 });
   // clock
   DrawTextEx(gGfx.font, s > 0.7f ? "??:??" : TextFormat("03:%02d", 33 + ((int)(time / 60)) % 27), { PW - 90, 16 }, 28, 1, Color{ 110, 110, 125, 255 });
   // objective
@@ -151,10 +166,17 @@ void PhoneDrawScreen(float time, float stress) {
     DrawTextEx(gGfx.font, buf, { (PW - m.x) / 2, 78 }, 24, 1, Fade(Color{ 222, 222, 232, 255 }, 0.9f - s * 0.25f));
   }
   // transient message — big and clear
+  // Typographic voice (NARRATIVE_DESIGN §5): UPPERCASE = the phone's voice
+  // (orders — bone-white, large); any lowercase = your own doubting head
+  // (cold blue, smaller). The font tells you who is speaking.
   if (gPhone.messageT > 0 && sinf(time * 6) > -0.4f) {
     CorruptText(gPhone.message.c_str(), s, buf, 96);
-    Vector2 m = MeasureTextEx(gGfx.font, buf, 36, 1);
-    DrawTextEx(gGfx.font, buf, { (PW - m.x) / 2, PH / 2 - 24 }, 36, 1, Color{ 238, 232, 226, 245 });
+    bool inner = false;
+    for (const char* c = gPhone.message.c_str(); *c; c++) if (*c >= 'a' && *c <= 'z') { inner = true; break; }
+    float fs = inner ? 28.0f : 36.0f;
+    Color mc = inner ? Color{ 150, 170, 200, 230 } : Color{ 238, 232, 226, 245 };
+    Vector2 m = MeasureTextEx(gGfx.font, buf, fs, 1);
+    DrawTextEx(gGfx.font, buf, { (PW - m.x) / 2, PH / 2 - 24 }, fs, 1, mc);
   }
   // charging progress bar
   if (gPhone.charging) {
@@ -311,8 +333,12 @@ void HudDraw(float time, float stress) {
     DrawRectangleLines(x, y, 38, 22, border);
     DrawTextEx(gGfx.font, TextFormat("%d", i + 1), { (float)x + 2, (float)y + 1 }, 8, 1, Fade(border, 0.8f));
     if (has) {
-      const char* label = (ids[i] == IT_BATTERY) ? TextFormat("x%d", gInv.batteries) : names[i];
-      DrawTextEx(gGfx.font, label, { (float)x + 7, (float)y + 9 }, 8, 1, Fade(WHITE, has ? 0.75f : 0.2f));
+      if (ids[i] == IT_BATTERY) { // count as pips, never a number (UI_UX §1A/6)
+        for (int b = 0; b < gInv.batteries && b < 4; b++)
+          DrawCircle(x + 9 + b * 7, y + 13, 2, Fade(Color{ 120, 220, 140, 255 }, 0.85f));
+      } else {
+        DrawTextEx(gGfx.font, names[i], { (float)x + 7, (float)y + 9 }, 8, 1, Fade(WHITE, 0.75f));
+      }
     }
     x += 42;
   }
