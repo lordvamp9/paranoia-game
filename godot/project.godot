@@ -5,16 +5,22 @@ config_version=5
 [application]
 config/name="PARANOIA"
 config/description="First-person psychological horror. You are being observed."
-run/main_scene="res://scenes/Main.tscn"
+run/main_scene="res://scenes/Game.tscn"
 config/features=PackedStringArray("4.3")
 config/icon="res://icon.svg"
 boot_splash/show_image=false
 
 [autoload]
-; Order matters: Config first (loads settings + InputMap), then Director, then GameState.
+; Config + World hold settings/data and must load first. Then the Session-9
+; required order: GameState, Director, PostFX, Audio (the AudioSynth GDExtension
+; wrapper). Runtime cross-references are all fine regardless; _ready has no
+; cross-autoload dependencies.
 Config="*res://scripts/config.gd"
-Director="*res://scripts/director.gd"
+World="*res://scripts/world.gd"
 GameState="*res://scripts/game_state.gd"
+Director="*res://scripts/director.gd"
+PostFX="*res://scripts/postfx.gd"
+Audio="*res://scripts/audio.gd"
 
 [display]
 window/size/viewport_width=1280

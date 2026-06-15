@@ -16,6 +16,13 @@ var fullscreen := 1
 
 func _ready() -> void:
 	load_cfg()
+	apply_audio()
+
+func apply_audio() -> void:
+	# push the loaded master volume into the AudioServer on startup
+	var bus := AudioServer.get_bus_index("Master")
+	if bus >= 0:
+		AudioServer.set_bus_volume_db(bus, linear_to_db(maxf(0.0001, vol_master)))
 
 func _cfg_path() -> String:
 	# Next to the executable, matching CfgPath() in config.h.

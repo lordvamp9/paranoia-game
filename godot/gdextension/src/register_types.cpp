@@ -6,14 +6,14 @@
 #include <godot_cpp/core/defs.hpp>
 #include <godot_cpp/godot.hpp>
 
-// #include "paranoia_synth.h"   // (Phase 3) AudioStreamPlayback synth  <- audio.h/music.h
+#include "paranoia_synth.h"    // AudioSynth — procedural audio (port of src/audio.js)
 // #include "world_gen.h"        // (Phase 2) procedural gen + collision  <- world.h/house.h
 
 using namespace godot;
 
 void initialize_paranoia_module(ModuleInitializationLevel p_level) {
     if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) return;
-    // GDREGISTER_CLASS(ParanoiaSynth);
+    GDREGISTER_CLASS(AudioSynth);
     // GDREGISTER_CLASS(WorldGen);
 }
 
